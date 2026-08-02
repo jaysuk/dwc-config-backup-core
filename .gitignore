@@ -1,0 +1,11 @@
+# Built by `npm run build` / the `prepare` lifecycle on install. Not committed; consumers installing
+# from github run `prepare` to produce it.
+dist/
+
+node_modules/
+coverage/
+
+# npm pack output - a local-machine-only workaround for consumers on this machine whose bundler
+# (Vite/Rollup lib-mode) silently externalizes a file:-linked directory dependency instead of
+# bundling it. Not something other consumers need; they install via `github:` + the prepare script.
+*.tgz
