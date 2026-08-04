@@ -95,6 +95,14 @@ export const DUET_FIFO_MAX_LIMIT = 20;
  */
 export const DUET_BACKUP_API_DEFAULT = "https://backup.duet3d.com/api";
 
+/**
+ * The Duet backup service's human-facing web UI (as opposed to `DUET_BACKUP_API_DEFAULT`, the API
+ * base this package's own client code talks to) - where a signed-in user can browse/manage their
+ * uploaded backups outside of any DWC plugin. Same host, no `/api` suffix. Verified live (2026-08-04,
+ * plain `GET /` returns 200 text/html).
+ */
+export const DUET_BACKUP_WEB_URL = "https://backup.duet3d.com/";
+
 /** Upload/download endpoint pair actually used (§2.3 Q2: the zip endpoint, hard 2 MB cap). */
 export const DUET_UPLOAD_PATH = "/api/upload-backup-zip";
 export const DUET_DOWNLOAD_PATH = "/api/download-backup-zip-by-id";
