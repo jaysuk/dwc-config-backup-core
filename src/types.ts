@@ -38,7 +38,7 @@ export interface ManifestFile {
 export interface ManifestSkipped {
 	source: string;
 	kind: BackupDirKind;
-	reason: "excluded-extension" | "too-large" | "read-error";
+	reason: "excluded-extension" | "excluded-folder" | "too-large" | "read-error";
 	size?: number;
 }
 

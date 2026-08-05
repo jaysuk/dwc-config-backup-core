@@ -10,7 +10,7 @@
  */
 import { sanitizeModel } from "./browser.js";
 
-import { BACKUP_DIR_KINDS, BINARY_EXTENSIONS, DEFAULT_DIR_PATH, EXCLUDED_EXTENSIONS, MAX_WALK_DEPTH } from "./constants.js";
+import { BACKUP_DIR_KINDS, BINARY_EXTENSIONS, DEFAULT_DIR_PATH, EXCLUDED_EXTENSIONS, EXCLUDED_FOLDERS, MAX_WALK_DEPTH } from "./constants.js";
 import type { BackupDirKind } from "./constants.js";
 import type { BackupProgressCallback, BackupScope, CollectedFile, ManifestBoard, ManifestSkipped } from "./types.js";
 
@@ -70,6 +70,13 @@ async function walkRec(
 		const relativePath = relBase ? `${relBase}/${entry.name}` : entry.name;
 		const source = `${dirPath}${entry.name}`;
 		if (entry.isDirectory) {
+			// depth === 0 here means this entry is a direct child of the kind's own root - matches
+			// where RRF actually puts an excluded folder (see EXCLUDED_FOLDERS), not a same-named
+			// folder nested somewhere else in the tree.
+			if (depth === 0 && EXCLUDED_FOLDERS[kind]?.has(entry.name)) {
+				result.skipped.push({ source, kind, reason: "excluded-folder", size: 0 });
+				continue;
+			}
 			await walkRec(io, `${source}/`, relativePath, kind, opts, depth + 1, result);
 			continue;
 		}

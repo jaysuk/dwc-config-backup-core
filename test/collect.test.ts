@@ -78,6 +78,42 @@ describe("walkDirectory - recursion, exclusion, size cap", () => {
 		expect(result.skipped[0]).toMatchObject({ reason: "too-large", size: 2_000_000 });
 	});
 
+	// M956's default accelerometer-sample output folder (see EXCLUDED_FOLDERS's doc comment) -
+	// resonance-tuning capture data, not configuration, and potentially large.
+	it("excludes 0:/sys/accelerometer/ entirely, without descending into it", async () => {
+		const io = makeFakeIo({
+			files: {
+				"0:/sys/": [dirEntry("accelerometer"), fileEntry("config.g")],
+				// Deliberately no entry for "0:/sys/accelerometer/" - if the walker recursed into
+				// it, getFileList would throw "no such directory" and fail the test.
+			},
+		});
+		const result = await walkDirectory(io, "0:/sys/", "system", { maxFileBytes: 1024 * 1024 });
+		expect(result.files.map((f) => f.relativePath)).toEqual(["config.g"]);
+		expect(result.skipped).toEqual([{ source: "0:/sys/accelerometer", kind: "system", reason: "excluded-folder", size: 0 }]);
+		expect(io.calls.getFileList).not.toContain("0:/sys/accelerometer/");
+	});
+
+	// The exclusion is scoped to "system"'s own root - a same-named folder inside a subdirectory,
+	// or under a different directory kind, is ordinary user content and must not be swept up too.
+	it("does not exclude an 'accelerometer' folder nested deeper, or under a different kind", async () => {
+		const io = makeFakeIo({
+			files: {
+				"0:/sys/": [dirEntry("Bed Leveling")],
+				"0:/sys/Bed Leveling/": [dirEntry("accelerometer")],
+				"0:/sys/Bed Leveling/accelerometer/": [fileEntry("notes.txt")],
+				"0:/macros/": [dirEntry("accelerometer")],
+				"0:/macros/accelerometer/": [fileEntry("run.g")],
+			},
+		});
+		const sysResult = await walkDirectory(io, "0:/sys/", "system", { maxFileBytes: 1024 * 1024 });
+		expect(sysResult.files.map((f) => f.relativePath)).toEqual(["Bed Leveling/accelerometer/notes.txt"]);
+		expect(sysResult.skipped).toHaveLength(0);
+
+		const macroResult = await walkDirectory(io, "0:/macros/", "macros", { maxFileBytes: 1024 * 1024 });
+		expect(macroResult.files.map((f) => f.relativePath)).toEqual(["accelerometer/run.g"]);
+	});
+
 	it("handles bigint sizes from FileListItem", async () => {
 		const io = makeFakeIo({ files: { "0:/sys/": [fileEntry("config.g", 12345n)] } });
 		const result = await walkDirectory(io, "0:/sys/", "system", { maxFileBytes: 1_000_000 });
