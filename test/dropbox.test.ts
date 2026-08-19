@@ -3,7 +3,16 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { deleteBackup, downloadBackup, DropboxError, listBackups, listMachineFolders, uploadBackup, verifyToken } from "../src/destinations/dropbox";
 
 function jsonResponse(body: unknown, status = 200): Response {
-	return { ok: status >= 200 && status < 300, status, json: async () => body, blob: async () => new Blob([JSON.stringify(body)]) } as unknown as Response;
+	return {
+		ok: status >= 200 && status < 300, status,
+		json: async () => body, text: async () => JSON.stringify(body), blob: async () => new Blob([JSON.stringify(body)]),
+	} as unknown as Response;
+}
+
+/** A response Dropbox sends for a request-shape failure (bad Dropbox-API-Arg JSON, wrong
+ *  Content-Type, ...) - PLAIN TEXT, not the structured {error_summary, error} envelope. */
+function textErrorResponse(text: string, status = 400): Response {
+	return { ok: false, status, text: async () => text, json: async () => { throw new SyntaxError("not json"); } } as unknown as Response;
 }
 
 afterEach(() => { vi.unstubAllGlobals(); });
@@ -94,8 +103,18 @@ describe("uploadBackup", () => {
 			.rejects.toThrow(/other\/\.\..*409/);
 	});
 
-	it("still throws a usable message when Dropbox's error body isn't JSON at all", async () => {
-		vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 500, json: async () => { throw new Error("not json"); } } as unknown as Response)));
+	// Dropbox only sends the structured {error_summary, error} JSON body for ROUTE-level errors.
+	// A request-shape failure (malformed Dropbox-API-Arg, wrong Content-Type, ...) gets a PLAIN TEXT
+	// body instead, which res.json() can't parse - this used to be silently discarded by a bare
+	// `.catch(() => null)`, throwing away the one useful detail Dropbox actually sent.
+	it("surfaces Dropbox's raw plain-text body when the error isn't JSON at all (e.g. a malformed request)", async () => {
+		vi.stubGlobal("fetch", vi.fn(async () => textErrorResponse("Error in call to API function 'files/upload': Dropbox-API-Arg header could not be parsed.", 400)));
+		await expect(uploadBackup("tok", "voron24", "backup.zip", new Blob(["zip"])))
+			.rejects.toThrow(/Dropbox-API-Arg header could not be parsed.*400/);
+	});
+
+	it("falls back to a bare status when even reading the response body fails", async () => {
+		vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 500, text: async () => { throw new Error("network cut off"); } } as unknown as Response)));
 		await expect(uploadBackup("tok", "voron24", "backup.zip", new Blob(["zip"])))
 			.rejects.toThrow(/500/);
 	});

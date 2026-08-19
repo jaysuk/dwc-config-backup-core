@@ -44,20 +44,31 @@ function authHeader(token: string): string {
  * pin to a specific known variant, just `"other/.."`. On its own that string doesn't say which union
  * produced it (auth, access/scope, rate-limit, or the route's own error type each have their own "
  * other" catch-all) - the HTTP status is what narrows that down (401 = auth, 403 = access/scope,
- * 409 = the route's own error, 429 = rate limit), so it's folded into every thrown message here
+ * 409 = the route's own error, 429 = rate limit) - so it's folded into every thrown message here
  * rather than discarded, even when Dropbox did send a structured body.
+ *
+ * That structured `{error_summary, error}` body is only sent for ROUTE-level errors. A request that
+ * fails before routing even happens - malformed `Dropbox-API-Arg` JSON, a bad Content-Type, other
+ * request-shape problems - gets a PLAIN TEXT body instead (confirmed against real reports of Dropbox
+ * 400s), which `res.json()` can't parse at all. That used to be silently swallowed by a bare
+ * `.catch(() => null)`, discarding the one piece of diagnostic detail Dropbox actually sent for
+ * exactly the class of error that most needs it. Read the body as text once, then try to parse it as
+ * JSON; either way something Dropbox actually said survives into the thrown error.
  */
-function describeError(status: number, data: { error_summary?: string } | null): string {
-	return data?.error_summary ? `${data.error_summary} (HTTP ${status})` : `Dropbox API error (HTTP ${status}).`;
+async function describeError(res: Response): Promise<string> {
+	const text = await res.text().catch(() => "");
+	let summary: string | undefined;
+	try { summary = (JSON.parse(text) as { error_summary?: string } | null)?.error_summary; } catch { /* not JSON - the raw text itself is Dropbox's detail */ }
+	const detail = summary || text;
+	return detail ? `${detail} (HTTP ${res.status})` : `Dropbox API error (HTTP ${res.status}).`;
 }
 
 async function apiCall(path: string, token: string, body: unknown): Promise<any> { // eslint-disable-line @typescript-eslint/no-explicit-any
 	const res = await fetch(`${API}${path}`, {
 		method: "POST", headers: { Authorization: authHeader(token), "Content-Type": "application/json" }, body: JSON.stringify(body ?? {}),
 	});
-	const data = await res.json().catch(() => null);
-	if (!res.ok) { throw new DropboxError(describeError(res.status, data)); }
-	return data;
+	if (!res.ok) { throw new DropboxError(await describeError(res)); }
+	return res.json();
 }
 
 export interface DropboxBackupEntry { path: string; name: string; size: number; serverModified: string }
@@ -104,8 +115,8 @@ export async function uploadBackup(token: string, hostname: string, filename: st
 		},
 		body: blob,
 	});
-	const data = await res.json().catch(() => null);
-	if (!res.ok) { throw new DropboxError(describeError(res.status, data)); }
+	if (!res.ok) { throw new DropboxError(await describeError(res)); }
+	const data = await res.json();
 	return { path: data.path_lower, name: data.name, size: data.size, serverModified: data.server_modified };
 }
 
@@ -113,7 +124,7 @@ export async function downloadBackup(token: string, path: string): Promise<Blob>
 	const res = await fetch(`${CONTENT_API}/files/download`, {
 		method: "POST", headers: { Authorization: authHeader(token), "Dropbox-API-Arg": JSON.stringify({ path }) },
 	});
-	if (!res.ok) { throw new DropboxError(`Download failed (${res.status}).`); }
+	if (!res.ok) { throw new DropboxError(await describeError(res)); }
 	return res.blob();
 }
 
