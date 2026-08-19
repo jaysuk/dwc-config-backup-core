@@ -1,9 +1,18 @@
 /**
- * Dropbox destination. Authenticated with a long-lived access token generated directly in the
- * Dropbox App Console (App Console -> your app -> "Generated access token") - no interactive OAuth
- * redirect, so unlike Google Drive this works fine from a plain-HTTP DWC origin. Both Dropbox API
- * hosts (`api.dropboxapi.com` for metadata calls, `content.dropboxapi.com` for upload/download) are
+ * Dropbox destination. Authenticated with an access token generated directly in the Dropbox App
+ * Console (App Console -> your app -> "Generated access token") - no interactive OAuth redirect, so
+ * unlike Google Drive this works fine from a plain-HTTP DWC origin. Both Dropbox API hosts
+ * (`api.dropboxapi.com` for metadata calls, `content.dropboxapi.com` for upload/download) are
  * CORS-open for browser apps.
+ *
+ * Scopes each call needs, taken from Dropbox's own API spec (dropbox/dropbox-api-spec) rather than
+ * inferred - the app must have ALL of these enabled before the token is generated:
+ *   account_info.read     users/get_current_account  ({@link verifyToken}, i.e. the Save button)
+ *   files.metadata.read   files/list_folder          ({@link listMachineFolders}, {@link listBackups})
+ *   files.content.write   files/upload, files/delete_v2
+ *   files.content.read    files/download
+ * A token is only ever granted the scopes its app had AT GENERATION TIME, so enabling a scope later
+ * requires generating a replacement token - see {@link TOKEN_REJECTED_HINT}.
  */
 export class DropboxError extends Error {
 	constructor(message: string) { super(message); this.name = "DropboxError"; }
@@ -55,12 +64,30 @@ function authHeader(token: string): string {
  * exactly the class of error that most needs it. Read the body as text once, then try to parse it as
  * JSON; either way something Dropbox actually said survives into the thrown error.
  */
+/**
+ * Every 401 from Dropbox means the same practical thing - "this token isn't allowed to do that" -
+ * but the tag alone never tells a USER what to do about it, and the most common cause here is
+ * genuinely non-obvious: enabling a scope in the App Console does NOT grant it to tokens that
+ * already exist. Dropbox is explicit that "just adding a scope to your app via the App Console does
+ * not retroactively grant that scope to existing access tokens", so the token has to be regenerated
+ * by hand afterwards - which reads as "I already fixed the permissions and it's still broken".
+ *
+ * `missing_scope` says this outright, but the generic `other` catch-all (and a bare `invalid_access_token`)
+ * doesn't, so the hint is attached to every 401 rather than only the tagged case.
+ */
+const TOKEN_REJECTED_HINT = "The Dropbox access token was rejected. If you just changed this app's "
+	+ "permissions in the Dropbox App Console, you must click Generate there to create a NEW access "
+	+ "token and paste it in again - changing an app's scopes never updates tokens that already exist. "
+	+ "Check that account_info.read, files.metadata.read, files.content.read and files.content.write "
+	+ "are all enabled BEFORE generating the new token.";
+
 async function describeError(res: Response): Promise<string> {
 	const text = await res.text().catch(() => "");
 	let summary: string | undefined;
 	try { summary = (JSON.parse(text) as { error_summary?: string } | null)?.error_summary; } catch { /* not JSON - the raw text itself is Dropbox's detail */ }
 	const detail = summary || text;
-	return detail ? `${detail} (HTTP ${res.status})` : `Dropbox API error (HTTP ${res.status}).`;
+	const base = detail ? `${detail} (HTTP ${res.status})` : `Dropbox API error (HTTP ${res.status}).`;
+	return res.status === 401 ? `${base} — ${TOKEN_REJECTED_HINT}` : base;
 }
 
 async function apiCall(path: string, token: string, body: unknown): Promise<any> { // eslint-disable-line @typescript-eslint/no-explicit-any

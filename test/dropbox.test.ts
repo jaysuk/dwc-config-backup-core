@@ -113,6 +113,23 @@ describe("uploadBackup", () => {
 			.rejects.toThrow(/Dropbox-API-Arg header could not be parsed.*400/);
 	});
 
+	// A 401 is the one status whose cause a user cannot act on from the tag alone: the most common
+	// reason (a scope enabled AFTER the token was generated) looks identical to a plain bad token,
+	// and Dropbox's generic "other" tag says nothing at all. The hint has to ride on every 401.
+	it("attaches the regenerate-your-token hint to a 401, whatever tag Dropbox used", async () => {
+		for (const summary of ["other/..", "invalid_access_token/..", "missing_scope/..."]) {
+			vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ error_summary: summary }, 401)));
+			await expect(uploadBackup("tok", "voron24", "backup.zip", new Blob(["zip"])), summary)
+				.rejects.toThrow(/generate a NEW access token|Generate there to create a NEW/i);
+		}
+	});
+
+	it("does not attach the token hint to non-401 failures, where it would be misleading", async () => {
+		vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ error_summary: "path/insufficient_space/.." }, 409)));
+		await expect(uploadBackup("tok", "voron24", "backup.zip", new Blob(["zip"])))
+			.rejects.toThrow(/^(?!.*NEW access token).*insufficient_space/s);
+	});
+
 	it("falls back to a bare status when even reading the response body fails", async () => {
 		vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 500, text: async () => { throw new Error("network cut off"); } } as unknown as Response)));
 		await expect(uploadBackup("tok", "voron24", "backup.zip", new Blob(["zip"])))
