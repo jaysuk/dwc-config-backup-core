@@ -56,6 +56,24 @@ const GCODE_PARAM_RULES: Record<string, Record<string, ParamRule>> = {
 // kind of "login information" that must still be caught, plugin-owned file or not.
 const SENSITIVE_NAME_RE = /pass|pwd|secret|token|key|auth|psk|ssid|cred|api|bearer|webhook|hash/i;
 
+// Ordinary field/variable names that happen to CONTAIN one of the fragments above but are never
+// themselves credentials - checked as a whole-name allowlist before the substring test, so genuinely
+// compound sensitive names (authToken, apiKey, wifiPassword, ...) are still caught by the substring
+// match. A plain word-boundary fix doesn't work here: "auth" is a legitimate PREFIX in real matches
+// too (authToken, authKey), not just an unwanted substring, so tightening the regex itself would risk
+// under-redacting real credentials - an allowlist can only ever suppress a match, never add one.
+// "author"/"authors" is a real npm/DWC plugin.json field (this bug report); "rapidRate"/"rapid" is
+// FL's own Preflight widget setting (model/document.ts) - same "auth"/"api" fragment collision,
+// caught by inspection while fixing the reported one.
+const SENSITIVE_NAME_ALLOWLIST = new Set(["author", "authors", "rapidrate", "rapid"]);
+
+/** True if `name` looks like a credential/secret field name - substring match against
+ *  SENSITIVE_NAME_RE, minus the known-safe false positives in SENSITIVE_NAME_ALLOWLIST. */
+function isSensitiveName(name: string): boolean {
+	if (SENSITIVE_NAME_ALLOWLIST.has(name.toLowerCase())) { return false; }
+	return SENSITIVE_NAME_RE.test(name);
+}
+
 const LEADING_CODE_RE = /^\s*(?:N\d+\s+)?([A-Za-z]\d+(?:\.\d+)?)\b/;
 const ASSIGNMENT_RE = /^(\s*(?:set\s+global\.|var\s+)([A-Za-z_][A-Za-z0-9_]*)\s*=\s*)("(?:[^"]|"")*"|\S+)(.*)$/i;
 const IS_GLOBAL_RE = /^\s*set\s+global\./i;
@@ -195,7 +213,7 @@ export function redactGcodeLine(
 	const assignment = ASSIGNMENT_RE.exec(code);
 	if (assignment) {
 		const [, prefix, varName, value, rest] = assignment;
-		if (SENSITIVE_NAME_RE.test(varName)) {
+		if (isSensitiveName(varName)) {
 			const id = nextId();
 			const pseudoCode = IS_GLOBAL_RE.test(code) ? "GLOBAL" : "VAR";
 			entries.push({
@@ -359,7 +377,7 @@ function redactJsonValue(
 	if (value && typeof value === "object") {
 		const result: Record<string, unknown> = {};
 		for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-			const sensitive = SENSITIVE_NAME_RE.test(k);
+			const sensitive = isSensitiveName(k);
 			result[k] = redactJsonValue(v, sensitive, jsonPointerAppend(pointer, k), mode, path, nextId, out);
 		}
 		return result;

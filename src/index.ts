@@ -35,6 +35,7 @@ export * from "./machineIdentity.js";
 // --- Storage, credentials, encryption -----------------------------------------------------------
 export * from "./credentials.js";
 export * from "./credentialsSdSync.js";
+export * from "./credentialsMigrate.js";
 export * from "./encryption.js";
 
 // --- Utilities ----------------------------------------------------------------------------------

@@ -21,12 +21,25 @@ function folderFor(hostname: string): string {
 	return `${ROOT_FOLDER}/${sanitiseSegment(hostname)}`;
 }
 
+/**
+ * Dropbox's `error_summary` is a debug string built by walking the response's error union tag(s),
+ * e.g. `"path/not_found/.."` or, for an unclassified/uncategorised failure the server itself couldn't
+ * pin to a specific known variant, just `"other/.."`. On its own that string doesn't say which union
+ * produced it (auth, access/scope, rate-limit, or the route's own error type each have their own "
+ * other" catch-all) - the HTTP status is what narrows that down (401 = auth, 403 = access/scope,
+ * 409 = the route's own error, 429 = rate limit), so it's folded into every thrown message here
+ * rather than discarded, even when Dropbox did send a structured body.
+ */
+function describeError(status: number, data: { error_summary?: string } | null): string {
+	return data?.error_summary ? `${data.error_summary} (HTTP ${status})` : `Dropbox API error (HTTP ${status}).`;
+}
+
 async function apiCall(path: string, token: string, body: unknown): Promise<any> { // eslint-disable-line @typescript-eslint/no-explicit-any
 	const res = await fetch(`${API}${path}`, {
 		method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify(body ?? {}),
 	});
 	const data = await res.json().catch(() => null);
-	if (!res.ok) { throw new DropboxError(data?.error_summary ?? `Dropbox API error (${res.status}).`); }
+	if (!res.ok) { throw new DropboxError(describeError(res.status, data)); }
 	return data;
 }
 
@@ -75,7 +88,7 @@ export async function uploadBackup(token: string, hostname: string, filename: st
 		body: blob,
 	});
 	const data = await res.json().catch(() => null);
-	if (!res.ok) { throw new DropboxError(data?.error_summary ?? `Upload failed (${res.status}).`); }
+	if (!res.ok) { throw new DropboxError(describeError(res.status, data)); }
 	return { path: data.path_lower, name: data.name, size: data.size, serverModified: data.server_modified };
 }
 

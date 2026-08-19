@@ -1,6 +1,6 @@
 {
   "name": "dwc-config-backup-core",
-  "version": "0.1.1",
+  "version": "0.1.4",
   "type": "module",
   "description": "Framework-free core of the whole-machine configuration backup & restore feature for DuetWebControl plugins: archive format, redaction engine, restore planner, credential storage/encryption and cloud destination adapters (Duet service, GitHub, Dropbox, WebDAV, Google Drive). No Vue, Pinia/Vuex or DWC imports, so it can be consumed by both DWC 3.6 (Vue 2) and DWC 3.7 (Vue 3) plugins.",
   "license": "GPL-3.0-or-later",
@@ -47,6 +47,10 @@
     "./credentialsSdSync": {
       "types": "./dist/credentialsSdSync.d.ts",
       "import": "./dist/credentialsSdSync.js"
+    },
+    "./credentialsMigrate": {
+      "types": "./dist/credentialsMigrate.d.ts",
+      "import": "./dist/credentialsMigrate.js"
     },
     "./destinations/*": {
       "types": "./dist/destinations/*.d.ts",

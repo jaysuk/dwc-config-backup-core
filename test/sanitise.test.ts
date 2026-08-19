@@ -248,6 +248,35 @@ describe("Tier 3/4 - JSON files", () => {
 		expect(redactions).toHaveLength(2);
 	});
 
+	it("does not redact a plugin.json 'author' field - a false positive from the 'auth' fragment", () => {
+		const json = JSON.stringify({ author: "James Skitt", authors: ["James Skitt"], displayName: "My Plugin" });
+		const { content, redactions } = redactJson(json, "redact", "files/sys/some-plugin/plugin.json", counter());
+		const parsed = JSON.parse(content);
+		expect(parsed.author).toBe("James Skitt");
+		expect(parsed.authors).toEqual(["James Skitt"]);
+		expect(redactions).toHaveLength(0);
+	});
+
+	it("does not redact FL's own 'rapidRate' setting - a false positive from the 'api' fragment", () => {
+		const json = JSON.stringify({ rapidRate: 3000 });
+		const { content, redactions } = redactJson(json, "redact", "files/sys/flexible-layouts.backup.json", counter());
+		const parsed = JSON.parse(content);
+		expect(parsed.rapidRate).toBe(3000);
+		expect(redactions).toHaveLength(0);
+	});
+
+	it("still redacts a genuinely compound sensitive name built from an allowlisted fragment (authToken, not author)", () => {
+		// The allowlist only suppresses the EXACT names in it - "authToken" isn't "author", so the
+		// "auth" substring match still applies. Guards against a future allowlist entry accidentally
+		// being too broad.
+		const json = JSON.stringify({ authToken: "abc123", author: "James Skitt" });
+		const { content, redactions } = redactJson(json, "redact", "files/sys/some-plugin.json", counter());
+		const parsed = JSON.parse(content);
+		expect(parsed.authToken).toBe("[REDACTED]");
+		expect(parsed.author).toBe("James Skitt");
+		expect(redactions).toHaveLength(1);
+	});
+
 	it("leaves malformed JSON untouched", () => {
 		const { content, redactions } = redactJson("{not valid json", "redact", "files/sys/bad.json", counter());
 		expect(content).toBe("{not valid json");

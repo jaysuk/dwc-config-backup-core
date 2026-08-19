@@ -72,6 +72,20 @@ describe("uploadBackup", () => {
 		await uploadBackup("tok", "My Printer!", "backup.zip", new Blob(["zip"]));
 		expect(capturedArg.path).toBe("/Duet Config Backups/My_Printer_/backup.zip");
 	});
+
+	// This path was completely untested before - a failed upload was never exercised at all, so a
+	// regression here (e.g. losing the status code again) would not have been caught.
+	it("throws with both the error_summary AND the HTTP status - error_summary alone doesn't say which error union produced it", async () => {
+		vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ error_summary: "other/.." }, 409)));
+		await expect(uploadBackup("tok", "voron24", "backup.zip", new Blob(["zip"])))
+			.rejects.toThrow(/other\/\.\..*409/);
+	});
+
+	it("still throws a usable message when Dropbox's error body isn't JSON at all", async () => {
+		vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 500, json: async () => { throw new Error("not json"); } } as unknown as Response)));
+		await expect(uploadBackup("tok", "voron24", "backup.zip", new Blob(["zip"])))
+			.rejects.toThrow(/500/);
+	});
 });
 
 describe("downloadBackup / deleteBackup / verifyToken", () => {

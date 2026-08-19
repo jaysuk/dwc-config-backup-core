@@ -48,7 +48,13 @@ function makeMemoryStorage(): Storage {
 
 let memoryFallback: Storage | null = null;
 
-function ls(): Storage | null {
+/** The storage this module actually reads/writes: real `window.localStorage` when it's genuinely
+ * usable, else a shared in-memory fallback (some private-browsing modes throw on write; this repo's
+ * own Vitest/happy-dom environment has also been observed to expose a non-functional stub). Exported
+ * so credentialsMigrate.ts's raw namespace reads hit the exact same backing store - a second, separate
+ * fallback Map there would silently never see this module's own writes whenever the real localStorage
+ * is unusable, which is exactly the environment this file already has to defend against. */
+export function ls(): Storage | null {
 	try {
 		const real = window.localStorage;
 		if (real && typeof real.setItem === "function" && typeof real.getItem === "function") {
