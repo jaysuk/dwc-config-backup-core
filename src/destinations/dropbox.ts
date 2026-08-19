@@ -22,6 +22,23 @@ function folderFor(hostname: string): string {
 }
 
 /**
+ * Every caller of this module gets `token` straight from an unvalidated UI text field (see
+ * CloudPanel.vue in each consuming plugin) and it is stored/round-tripped verbatim afterward -
+ * nothing upstream trims it. A trailing newline or leading/trailing space from a copy-paste (common:
+ * many "copy" affordances on a web page include the line's own trailing newline) survives all the way
+ * into the `Authorization` header. Some Dropbox-side auth handling can reject a header shaped like
+ * that as fundamentally unparseable rather than as "a specific, wrong token" - the AuthError union's
+ * enumerated reasons (invalid_access_token, expired_access_token, missing_scope, ...) are for a
+ * well-formed-but-wrong credential, not a malformed header value, so this class of failure is a
+ * plausible source of the unhelpfully generic `.tag: "other"` on /users/get_current_account or
+ * /files/upload. Trimmed once, here, so every exported function is protected regardless of what the
+ * caller passed in - cheaper and more robust than fixing every UI's input field individually.
+ */
+function authHeader(token: string): string {
+	return `Bearer ${token.trim()}`;
+}
+
+/**
  * Dropbox's `error_summary` is a debug string built by walking the response's error union tag(s),
  * e.g. `"path/not_found/.."` or, for an unclassified/uncategorised failure the server itself couldn't
  * pin to a specific known variant, just `"other/.."`. On its own that string doesn't say which union
@@ -36,7 +53,7 @@ function describeError(status: number, data: { error_summary?: string } | null):
 
 async function apiCall(path: string, token: string, body: unknown): Promise<any> { // eslint-disable-line @typescript-eslint/no-explicit-any
 	const res = await fetch(`${API}${path}`, {
-		method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify(body ?? {}),
+		method: "POST", headers: { Authorization: authHeader(token), "Content-Type": "application/json" }, body: JSON.stringify(body ?? {}),
 	});
 	const data = await res.json().catch(() => null);
 	if (!res.ok) { throw new DropboxError(describeError(res.status, data)); }
@@ -81,7 +98,7 @@ export async function uploadBackup(token: string, hostname: string, filename: st
 	const res = await fetch(`${CONTENT_API}/files/upload`, {
 		method: "POST",
 		headers: {
-			Authorization: `Bearer ${token}`,
+			Authorization: authHeader(token),
 			"Content-Type": "application/octet-stream",
 			"Dropbox-API-Arg": JSON.stringify({ path, mode: "add", autorename: true, mute: true }),
 		},
@@ -94,7 +111,7 @@ export async function uploadBackup(token: string, hostname: string, filename: st
 
 export async function downloadBackup(token: string, path: string): Promise<Blob> {
 	const res = await fetch(`${CONTENT_API}/files/download`, {
-		method: "POST", headers: { Authorization: `Bearer ${token}`, "Dropbox-API-Arg": JSON.stringify({ path }) },
+		method: "POST", headers: { Authorization: authHeader(token), "Dropbox-API-Arg": JSON.stringify({ path }) },
 	});
 	if (!res.ok) { throw new DropboxError(`Download failed (${res.status}).`); }
 	return res.blob();

@@ -63,6 +63,19 @@ describe("uploadBackup", () => {
 		expect(capturedArg.mode).toBe("add");
 	});
 
+	// Regression coverage for a real gap: nothing upstream (the token text field, credential storage)
+	// trims what the user pasted. A trailing newline is a common copy-paste artifact and survives
+	// straight into the Authorization header unless this module defends against it itself.
+	it("trims a token with a trailing newline/whitespace before building the Authorization header", async () => {
+		let capturedAuth = "";
+		vi.stubGlobal("fetch", vi.fn(async (_url: string, init: RequestInit) => {
+			capturedAuth = (init.headers as Record<string, string>).Authorization;
+			return jsonResponse({ path_lower: "x", name: "x", size: 0, server_modified: "t" });
+		}));
+		await uploadBackup("  tok\n", "voron24", "backup.zip", new Blob(["zip"]));
+		expect(capturedAuth).toBe("Bearer tok");
+	});
+
 	it("sanitises the hostname for the folder path", async () => {
 		let capturedArg: any;
 		vi.stubGlobal("fetch", vi.fn(async (_url: string, init: RequestInit) => {
