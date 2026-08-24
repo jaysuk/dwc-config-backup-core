@@ -80,18 +80,21 @@ export const DUET_FIFO_MAX_LIMIT = 20;
  * Base URL of the Duet backup service. History: 2026-07-26, a bare IP with no domain; 2026-07-30,
  * moved to `http://backup.duet3d.com:3377` (same bare host:port shape, still plain HTTP only);
  * 2026-07-31, the backend's maintainers added a genuine HTTPS front (nginx) at
- * `https://backup.duet3d.com/api`, which THIS constant now points at - resolving the mixed-content
+ * `https://backup.duet3d.com`, which THIS constant now points at - resolving the mixed-content
  * caveat that applied to every earlier form of this URL, for every DWC page regardless of which
  * protocol it's served over (see below).
  *
- * **Non-obvious path quirk, confirmed by direct request - do not "fix" this without re-testing
- * first**: nginx strips exactly one `/api/` segment before proxying upstream, and the backend's own
- * Express routes are registered AS `/api/<endpoint>` (unchanged from the old server). So the existing
- * call-site pattern of `${apiUrl}/api/get-backup-list` etc. needs `apiUrl` to already end in `/api`
- * to land correctly - i.e. the real request path is `/api/api/get-backup-list`, which looks wrong at
- * a glance but is exactly what both the client code and the nginx config expect. Verified: a single
- * `/api/get-backup-list` 404s ("Cannot GET /get-backup-list" - the `/api` nginx stripped never
- * reaches the Express route it needs); `/api/api/get-backup-list` correctly 401s.
+ * **Path quirk history - do not reintroduce the `/api` suffix here without re-testing first**:
+ * until 2026-08-24, nginx stripped exactly one `/api/` segment before proxying upstream, so this
+ * constant had to end in `/api` to make the call-site pattern `${apiUrl}/api/get-backup-list` land
+ * correctly (the real request path was `/api/api/get-backup-list`). On 2026-08-24 the maintainer
+ * changed nginx to stop stripping that segment (and updated the backend to match), which silently
+ * broke every request from this plugin - the doubled `/api/api/...` path now 404s
+ * ("Cannot POST /api/auth/connect/login"), because nginx forwards it unchanged and Express has no
+ * route registered under the doubled prefix. Verified live: `/api/api/auth/connect/login` 404s,
+ * `/api/auth/connect/login` correctly returns a real auth response, and `/api/get-backup-list` with
+ * a bad token correctly 401s. So `apiUrl` must NOT include `/api` any more - the call sites' own
+ * `/api/...` segment is now the only one that should appear on the wire.
  *
  * **Why this alone covers both HTTP- and HTTPS-served DWC pages, with no protocol-detection needed**:
  * mixed-content blocking is one-directional - a browser blocks an HTTPS page from fetching plain HTTP,
@@ -105,7 +108,7 @@ export const DUET_FIFO_MAX_LIMIT = 20;
  * This is the ONLY value used - it is deliberately not user-visible or user-editable (a product
  * decision: there is no URL field anywhere in the UI).
  */
-export const DUET_BACKUP_API_DEFAULT = "https://backup.duet3d.com/api";
+export const DUET_BACKUP_API_DEFAULT = "https://backup.duet3d.com";
 
 /**
  * The Duet backup service's human-facing web UI (as opposed to `DUET_BACKUP_API_DEFAULT`, the API
