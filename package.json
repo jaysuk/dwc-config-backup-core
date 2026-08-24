@@ -73,6 +73,7 @@
     "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
+    "@zip.js/zip.js": "^2.8.58",
     "jszip": "^3.10.1"
   },
   "devDependencies": {

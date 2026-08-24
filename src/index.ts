@@ -27,6 +27,7 @@ export * from "./types.js";
 // --- Pipeline -----------------------------------------------------------------------------------
 export * from "./collect.js";
 export * from "./archive.js";
+export * from "./encryptedZip.js";
 export * from "./sanitise.js";
 export * from "./repair.js";
 export * from "./restore.js";

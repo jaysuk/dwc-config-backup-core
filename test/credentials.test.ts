@@ -2,9 +2,9 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import {
 	addBackedUpMachineKey, addRedactionExclusion, getAutoBackupNudgeSettings, getBackedUpMachineKeys,
-	getDuetCloudFifoLimit, getLastBackupAt, getRedactionExclusions, getRedactPreference, hasAcknowledgedUnredacted,
-	removeRedactionExclusion, resetForTests, setAcknowledgedUnredacted, setAutoBackupNudgeSettings,
-	setDuetCloudFifoLimit, setLastBackupAt, setRedactPreference,
+	getDuetCloudFifoLimit, getEncryptPreference, getLastBackupAt, getRedactionExclusions, getRedactPreference,
+	hasAcknowledgedUnredacted, removeRedactionExclusion, resetForTests, setAcknowledgedUnredacted,
+	setAutoBackupNudgeSettings, setDuetCloudFifoLimit, setEncryptPreference, setLastBackupAt, setRedactPreference,
 } from "../src/credentials";
 
 beforeEach(() => {
@@ -21,6 +21,20 @@ describe("per-destination redact preference", () => {
 		setRedactPreference("duet", true);
 		expect(getRedactPreference("duet")).toBe(true);
 		expect(getRedactPreference("local")).toBe(false);
+	});
+});
+
+describe("per-destination encrypt preference (ENCRYPTED-BACKUPS-PLAN.md §5.9)", () => {
+	it("defaults to off for every destination, including local", () => {
+		expect(getEncryptPreference("local")).toBe(false);
+		expect(getEncryptPreference("github")).toBe(false);
+	});
+
+	it("remembers a per-destination choice independently, and independently of redact", () => {
+		setEncryptPreference("github", true);
+		expect(getEncryptPreference("github")).toBe(true);
+		expect(getEncryptPreference("local")).toBe(false);
+		expect(getRedactPreference("github")).toBe(false);
 	});
 });
 

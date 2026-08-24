@@ -6,6 +6,7 @@ import JSZip from "jszip";
 
 import { ARCHIVE_KIND, ARCHIVE_README, ARCHIVE_SCHEMA_VERSION, BACKUP_DIR_KINDS, DEFAULT_DIR_PATH, DIR_FOLDER, REDACTIONS_KIND, REDACTIONS_SCHEMA_VERSION } from "./constants.js";
 import type { BackupDirKind } from "./constants.js";
+import { encryptArchiveBlob } from "./encryptedZip.js";
 import { cyrb53, detectHashAlgo, hashBytes } from "./hash.js";
 import { sanitiseFile, redactM122 } from "./sanitise.js";
 import type { SanitiseMode } from "./sanitise.js";
@@ -54,6 +55,11 @@ export interface BuildArchiveOptions {
 	dwcVersion: string;
 	/** User-excluded names (REDACTION-EXCLUSIONS-PLAN.md §5) - already lowercased, see SanitiseOptions. */
 	excludedNames?: ReadonlySet<string>;
+	/** Password-protect the built archive (ENCRYPTED-BACKUPS-PLAN.md §5.1) - AES-256, via
+	 *  @zip.js/zip.js. Absent = plain zip, unchanged from every existing caller. The host UI is
+	 *  responsible for obtaining the password before calling buildArchive - mirrors how `redact`
+	 *  already works: this module takes the final decision, it never shows a dialog itself. */
+	encrypt?: { password: string };
 }
 
 export interface CollectedInput {
@@ -69,6 +75,10 @@ export interface BuildArchiveResult {
 	redactions: RedactionsFile;
 	/** Pre-compression byte totals, for the 2 MB pre-flight breakdown (§2.3 Q2). */
 	sizeBySection: { system: number; macros: number; filaments: number; objectModel: number; diagnostics: number };
+	/** True if `blob` is password-protected (ENCRYPTED-BACKUPS-PLAN.md §5.1) - mirrors
+	 *  `manifest.redacted`, set from `opts.encrypt != null`, so a caller can show "Encrypted" without
+	 *  re-inspecting its own options object. */
+	encrypted: boolean;
 }
 
 export async function buildArchive(collected: CollectedInput, opts: BuildArchiveOptions): Promise<BuildArchiveResult> {
@@ -161,11 +171,12 @@ export async function buildArchive(collected: CollectedInput, opts: BuildArchive
 	};
 	zip.file("manifest.json", JSON.stringify(manifest, null, 2));
 
-	const blob = await zip.generateAsync({
+	const plainBlob = await zip.generateAsync({
 		type: "blob", mimeType: "application/zip", compression: "DEFLATE", compressionOptions: { level: 9 },
 	});
+	const blob = opts.encrypt ? await encryptArchiveBlob(plainBlob, opts.encrypt.password) : plainBlob;
 
-	return { blob, manifest, redactions: redactionsFile, sizeBySection };
+	return { blob, manifest, redactions: redactionsFile, sizeBySection, encrypted: opts.encrypt != null };
 }
 
 function sanitiseM122(text: string, path: string, mode: SanitiseMode, nextId: () => number) {

@@ -248,6 +248,23 @@ export function setRedactPreference(destination: BackupDestinationId, on: boolea
 	ls()?.setItem(`${ns()}.redact.${destination}`, on ? "1" : "0");
 }
 
+// --- Per-destination "encrypt this backup" preference (ENCRYPTED-BACKUPS-PLAN.md §5.9) - default
+// off, remembered per destination, same shape as the redact preference above. Offered for EVERY
+// destination including "local" (unlike the unredacted-warning gate, which skips "local" because
+// nothing leaves the machine) - encryption's motivation for a local download is independent: the file
+// at rest on the user's own computer, in an email, in a personal cloud drive, etc.
+//
+// This is a preference, not the password itself - no password is ever persisted here or anywhere else
+// (ENCRYPTED-BACKUPS-PLAN.md §5.2: typed fresh per backup, at most remembered in host UI memory for
+// the rest of a session, never localStorage).
+
+export function getEncryptPreference(destination: BackupDestinationId): boolean {
+	return ls()?.getItem(`${ns()}.encrypt.${destination}`) === "1";
+}
+export function setEncryptPreference(destination: BackupDestinationId, on: boolean): void {
+	ls()?.setItem(`${ns()}.encrypt.${destination}`, on ? "1" : "0");
+}
+
 /** Whether the user has already acknowledged sending an unredacted backup to this destination once. */
 export function hasAcknowledgedUnredacted(destination: BackupDestinationId): boolean {
 	return ls()?.getItem(`${ns()}.unredactedAck.${destination}`) === "1";

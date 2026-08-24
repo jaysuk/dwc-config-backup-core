@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { buildArchive, computeMachineKey, readArchive } from "../src/archive";
+import { isEncryptedArchiveBlob, decryptArchiveBlob } from "../src/encryptedZip";
 import { resetHashAlgoCache } from "../src/hash";
 import type { CollectedFile } from "../src/types";
 
@@ -110,6 +111,33 @@ describe("buildArchive / readArchive round-trip", () => {
 		);
 		expect(manifest.redacted).toBe(true);
 		const parsed = await readArchive(blob);
+		expect(parsed.textFiles.get("files/sys/config.g")).toContain('P"[REDACTED]"');
+	});
+
+	it("with no encrypt option, behaves exactly as before (regression guard, ENCRYPTED-BACKUPS-PLAN.md)", async () => {
+		const { blob, encrypted } = await buildArchive(
+			{ files: [configFile("hello")], skipped: [], objectModelJson: null, diagnostics: null },
+			baseOptions(),
+		);
+		expect(encrypted).toBe(false);
+		expect(await isEncryptedArchiveBlob(blob)).toBe(false);
+		// still a plain, directly-readable archive - no decryption step required.
+		const parsed = await readArchive(blob);
+		expect(parsed.textFiles.get("files/sys/config.g")).toBe("hello");
+	});
+
+	it("password-protects the built archive when encrypt is set, and it decrypts back to the same archive", async () => {
+		const { blob, encrypted } = await buildArchive(
+			{ files: [configFile('M587 S"HomeNet" P"secret"')], skipped: [], objectModelJson: null, diagnostics: null },
+			baseOptions({ redact: true, encrypt: { password: "hunter2" } }),
+		);
+		expect(encrypted).toBe(true);
+		expect(await isEncryptedArchiveBlob(blob)).toBe(true);
+		// the plain archive is not readable directly - encryption actually changed what's on the wire.
+		await expect(readArchive(blob)).rejects.toThrow();
+
+		const plain = await decryptArchiveBlob(blob, "hunter2");
+		const parsed = await readArchive(plain);
 		expect(parsed.textFiles.get("files/sys/config.g")).toContain('P"[REDACTED]"');
 	});
 });
