@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
 import {
-	addBackedUpMachineKey, getAutoBackupNudgeSettings, getBackedUpMachineKeys, getDuetCloudFifoLimit,
-	getLastBackupAt, getRedactPreference, hasAcknowledgedUnredacted, resetForTests, setAcknowledgedUnredacted,
-	setAutoBackupNudgeSettings, setDuetCloudFifoLimit, setLastBackupAt, setRedactPreference,
+	addBackedUpMachineKey, addRedactionExclusion, getAutoBackupNudgeSettings, getBackedUpMachineKeys,
+	getDuetCloudFifoLimit, getLastBackupAt, getRedactionExclusions, getRedactPreference, hasAcknowledgedUnredacted,
+	removeRedactionExclusion, resetForTests, setAcknowledgedUnredacted, setAutoBackupNudgeSettings,
+	setDuetCloudFifoLimit, setLastBackupAt, setRedactPreference,
 } from "../src/credentials";
 
 beforeEach(() => {
@@ -63,6 +64,29 @@ describe("backed-up machine keys", () => {
 		addBackedUpMachineKey("machine-b");
 		addBackedUpMachineKey("machine-a");
 		expect(getBackedUpMachineKeys().sort()).toEqual(["machine-a", "machine-b"]);
+	});
+});
+
+describe("redaction exclusions", () => {
+	it("defaults to empty", () => {
+		expect(getRedactionExclusions()).toEqual([]);
+	});
+	it("accumulates distinct names without duplicates, lowercased", () => {
+		addRedactionExclusion("maxPass");
+		addRedactionExclusion("pass");
+		addRedactionExclusion("MAXPASS");
+		expect(getRedactionExclusions().sort()).toEqual(["maxpass", "pass"]);
+	});
+	it("removes a name", () => {
+		addRedactionExclusion("pass");
+		addRedactionExclusion("maxpass");
+		removeRedactionExclusion("PASS");
+		expect(getRedactionExclusions()).toEqual(["maxpass"]);
+	});
+	it("removing a name that isn't excluded is a no-op", () => {
+		addRedactionExclusion("pass");
+		removeRedactionExclusion("nope");
+		expect(getRedactionExclusions()).toEqual(["pass"]);
 	});
 });
 

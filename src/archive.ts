@@ -52,6 +52,8 @@ export interface BuildArchiveOptions {
 	directories: Partial<Record<BackupDirKind, string>>;
 	pluginVersion: string;
 	dwcVersion: string;
+	/** User-excluded names (REDACTION-EXCLUSIONS-PLAN.md §5) - already lowercased, see SanitiseOptions. */
+	excludedNames?: ReadonlySet<string>;
 }
 
 export interface CollectedInput {
@@ -85,7 +87,7 @@ export async function buildArchive(collected: CollectedInput, opts: BuildArchive
 		let content = file.content ?? "";
 		let redactions: Array<RedactionEntry> = [];
 		if (!file.binary) {
-			const result = sanitiseFile(archivePath, content, mode, nextId);
+			const result = sanitiseFile(archivePath, content, mode, nextId, { excludedNames: opts.excludedNames });
 			content = result.content;
 			redactions = result.redactions;
 		}

@@ -256,6 +256,35 @@ export function setAcknowledgedUnredacted(destination: BackupDestinationId): voi
 	ls()?.setItem(`${ns()}.unredactedAck.${destination}`, "1");
 }
 
+// --- Redaction exclusions (REDACTION-EXCLUSIONS-PLAN.md §5.6) - names the user has told the Tier-3
+// name heuristic to leave alone (e.g. "maxpass", a bed-levelling loop counter, not a password).
+//
+// Raw `ls()`, NOT `getJson`/`setJson`: those route through isEncryptable()/the session-key cache,
+// which would make this list unreadable (and therefore silently ignored by buildArchive - see
+// BuildArchiveOptions.excludedNames) while the credential store is locked. An exclusion list is a
+// preference, not a secret, so it must never gate on passphrase entry - same reasoning, and the same
+// raw-ls() pattern, as getBackedUpMachineKeys above.
+//
+// Stored lowercased, matching how isSensitiveName's own hardcoded allowlist compares (see
+// sanitise.ts). A host UI should still show the user the RAW name as it appeared in their file
+// (RedactionEntry.excludableName carries that) - lowercasing only happens for storage/comparison.
+
+export function getRedactionExclusions(): Array<string> {
+	const raw = ls()?.getItem(`${ns()}.redactionExclusions`);
+	if (!raw) { return []; }
+	try { return JSON.parse(raw) as Array<string>; } catch { return []; }
+}
+export function addRedactionExclusion(name: string): void {
+	const names = new Set(getRedactionExclusions());
+	names.add(name.toLowerCase());
+	ls()?.setItem(`${ns()}.redactionExclusions`, JSON.stringify(Array.from(names)));
+}
+export function removeRedactionExclusion(name: string): void {
+	const names = new Set(getRedactionExclusions());
+	names.delete(name.toLowerCase());
+	ls()?.setItem(`${ns()}.redactionExclusions`, JSON.stringify(Array.from(names)));
+}
+
 // --- Last backup timestamp (for the "last backup was N days ago" reminder) -----------------------------
 //
 // Plain metadata, not a credential - never encrypted, never gated behind isEncryptionEnabled().

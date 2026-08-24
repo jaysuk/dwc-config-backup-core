@@ -89,6 +89,29 @@ describe("buildArchive / readArchive round-trip", () => {
 		expect(manifest.hashAlgo).toBe("sha256");
 		expect(manifest.files[0].sha256).toMatch(/^[0-9a-f]{64}$/);
 	});
+
+	it("threads excludedNames through to the redaction engine (REDACTION-EXCLUSIONS-PLAN.md §6.1)", async () => {
+		const file = configFile('var maxPass = 5\nvar wifiPassword = "hunter2"');
+		const { manifest, blob } = await buildArchive(
+			{ files: [file], skipped: [], objectModelJson: null, diagnostics: null },
+			baseOptions({ redact: true, excludedNames: new Set(["maxpass"]) }),
+		);
+		const parsed = await readArchive(blob);
+		const content = parsed.textFiles.get("files/sys/config.g")!;
+		expect(content).toContain("var maxPass = 5"); // excluded - untouched
+		expect(content).not.toContain("hunter2"); // not excluded - still redacted
+		expect(manifest.counts.redactions).toBeGreaterThan(0);
+	});
+
+	it("with no excludedNames, behaves exactly as before this feature (regression guard)", async () => {
+		const { manifest, blob } = await buildArchive(
+			{ files: [configFile('M587 S"HomeNet" P"secret"')], skipped: [], objectModelJson: null, diagnostics: null },
+			baseOptions({ redact: true }),
+		);
+		expect(manifest.redacted).toBe(true);
+		const parsed = await readArchive(blob);
+		expect(parsed.textFiles.get("files/sys/config.g")).toContain('P"[REDACTED]"');
+	});
 });
 
 describe("readArchive - tolerant parsing", () => {

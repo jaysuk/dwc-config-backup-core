@@ -18,6 +18,17 @@ export interface SanitiseFileResult {
 	redactions: Array<RedactionEntry>;
 }
 
+/** See REDACTION-EXCLUSIONS-PLAN.md §5.5 - threaded explicitly rather than module-level state, so
+ *  this module stays PURE (per the doc comment above) and every result depends only on its inputs. */
+export interface SanitiseOptions {
+	/**
+	 * User-excluded names (REDACTION-EXCLUSIONS-PLAN.md §5.1/§5.6), already lowercased and deduped -
+	 * callers should pass `new Set(getRedactionExclusions().map(n => n.toLowerCase()))` or equivalent.
+	 * Only ever narrows the Tier-3 name heuristic (`isSensitiveName`); every other tier is unaffected.
+	 */
+	excludedNames?: ReadonlySet<string>;
+}
+
 // --- Tier 1/2: G-code command parameter rules ------------------------------------------------------
 
 interface ParamRule { tier: RedactionTier; label: string; restoreHint: RestoreHint }
@@ -54,7 +65,14 @@ const GCODE_PARAM_RULES: Record<string, Record<string, ParamRule>> = {
 // "hash" is included because that's the actual field naming FL's own access-lock config uses
 // (adminHash/operatorHash, see model/access.ts) - a stored password/credential hash is exactly the
 // kind of "login information" that must still be caught, plugin-owned file or not.
-const SENSITIVE_NAME_RE = /pass|pwd|secret|token|key|auth|psk|ssid|cred|api|bearer|webhook|hash/i;
+//
+// "passw" (not bare "pass") - every real credential field this needs to catch is password/passwd/
+// pwd/wifiPassword/adminPassword, all of which contain "passw". Bare "pass" doesn't appear in any of
+// them, but IS a common bed-levelling/wipe-pass loop-counter word in user macros (maxpass, npass,
+// passCount, ...) - reported false-positive redacting `var maxpass = 5` in bed.g. Unlike "auth"/"api"
+// (real prefixes in authToken/apiKey, so only an allowlist can safely narrow them - see below), "pass"
+// has no such compound-credential-name that "passw" would miss.
+const SENSITIVE_NAME_RE = /passw|pwd|secret|token|key|auth|psk|ssid|cred|api|bearer|webhook|hash/i;
 
 // Ordinary field/variable names that happen to CONTAIN one of the fragments above but are never
 // themselves credentials - checked as a whole-name allowlist before the substring test, so genuinely
@@ -68,9 +86,14 @@ const SENSITIVE_NAME_RE = /pass|pwd|secret|token|key|auth|psk|ssid|cred|api|bear
 const SENSITIVE_NAME_ALLOWLIST = new Set(["author", "authors", "rapidrate", "rapid"]);
 
 /** True if `name` looks like a credential/secret field name - substring match against
- *  SENSITIVE_NAME_RE, minus the known-safe false positives in SENSITIVE_NAME_ALLOWLIST. */
-function isSensitiveName(name: string): boolean {
-	if (SENSITIVE_NAME_ALLOWLIST.has(name.toLowerCase())) { return false; }
+ *  SENSITIVE_NAME_RE, minus the known-safe false positives in SENSITIVE_NAME_ALLOWLIST and whatever
+ *  this user has explicitly excluded (REDACTION-EXCLUSIONS-PLAN.md §5.1) - same exact-lowercased-name
+ *  check as the hardcoded allowlist, just from a second, user-editable source. `excludedNames` is
+ *  assumed already lowercased (see SanitiseOptions). */
+function isSensitiveName(name: string, excludedNames?: ReadonlySet<string>): boolean {
+	const lower = name.toLowerCase();
+	if (SENSITIVE_NAME_ALLOWLIST.has(lower)) { return false; }
+	if (excludedNames?.has(lower)) { return false; }
 	return SENSITIVE_NAME_RE.test(name);
 }
 
@@ -200,7 +223,7 @@ function appendTag(line: string, ids: Array<number>): string {
  * ids stay stable regardless of mode).
  */
 export function redactGcodeLine(
-	line: string, mode: SanitiseMode, path: string, lineNo: number, nextId: () => number,
+	line: string, mode: SanitiseMode, path: string, lineNo: number, nextId: () => number, opts?: SanitiseOptions,
 ): { line: string; redactions: Array<RedactionEntry> } {
 	const commentAt = findCommentStart(line);
 	const code = commentAt === -1 ? line : line.slice(0, commentAt);
@@ -213,12 +236,12 @@ export function redactGcodeLine(
 	const assignment = ASSIGNMENT_RE.exec(code);
 	if (assignment) {
 		const [, prefix, varName, value, rest] = assignment;
-		if (isSensitiveName(varName)) {
+		if (isSensitiveName(varName, opts?.excludedNames)) {
 			const id = nextId();
 			const pseudoCode = IS_GLOBAL_RE.test(code) ? "GLOBAL" : "VAR";
 			entries.push({
 				id, path, line: lineNo, tier: 3, kind: "gcode-command", code: pseudoCode, params: [varName],
-				label: `Variable "${varName}"`, restoreHint: "credential",
+				label: `Variable "${varName}"`, restoreHint: "credential", excludableName: varName,
 			});
 			if (mode === "redact") {
 				const replacement = isQuoted(value) ? `"${REDACTED_VALUE}"` : REDACTED_VALUE;
@@ -317,13 +340,15 @@ function stripPemBlocks(
 }
 
 /** Redact a `.g`/`.gcode` file: PEM pre-pass, then per-line command + tier-4 scanning. */
-export function redactGcodeFile(text: string, mode: SanitiseMode, path: string, nextId: () => number): SanitiseFileResult {
+export function redactGcodeFile(
+	text: string, mode: SanitiseMode, path: string, nextId: () => number, opts?: SanitiseOptions,
+): SanitiseFileResult {
 	const pem = stripPemBlocks(text, mode, path, nextId);
 	const lines = (mode === "redact" ? pem.text : text).split("\n");
 	const allEntries: Array<RedactionEntry> = [...pem.entries];
 	const outLines: Array<string> = [];
 	lines.forEach((line, idx) => {
-		const { line: newLine, redactions } = redactGcodeLine(line, mode, path, idx + 1, nextId);
+		const { line: newLine, redactions } = redactGcodeLine(line, mode, path, idx + 1, nextId, opts);
 		outLines.push(newLine);
 		allEntries.push(...redactions);
 	});
@@ -352,7 +377,8 @@ function jsonPointerAppend(base: string, key: string | number): string {
 }
 
 function redactJsonValue(
-	value: unknown, keyIsSensitive: boolean, pointer: string, mode: SanitiseMode, path: string, nextId: () => number, out: Array<RedactionEntry>,
+	value: unknown, sensitiveKey: string | null, pointer: string, mode: SanitiseMode, path: string,
+	nextId: () => number, out: Array<RedactionEntry>, opts?: SanitiseOptions,
 ): unknown {
 	if (typeof value === "string") {
 		// JSON redaction is KEY-NAME-ONLY (§3.3), not content-pattern scanning: `0:/sys/` JSON is
@@ -365,20 +391,26 @@ function redactJsonValue(
 		// including Flexible Layouts' own JSON - so this still catches what matters without touching
 		// everything else. (Tier-4 content-pattern scanning is unchanged for G-code and plain-text
 		// files, where "plugin config JSON" isn't the domain.)
-		if (keyIsSensitive) {
-			out.push({ id: nextId(), path, tier: 3, kind: "json-value", pointer, label: `JSON value at ${pointer}`, restoreHint: "credential" });
+		if (sensitiveKey != null) {
+			out.push({
+				id: nextId(), path, tier: 3, kind: "json-value", pointer, label: `JSON value at ${pointer}`,
+				restoreHint: "credential", excludableName: sensitiveKey,
+			});
 			return mode === "redact" ? REDACTED_VALUE : value;
 		}
 		return value;
 	}
 	if (Array.isArray(value)) {
-		return value.map((v, i) => redactJsonValue(v, keyIsSensitive, jsonPointerAppend(pointer, i), mode, path, nextId, out));
+		// `sensitiveKey` propagates unchanged into every element - an array under a sensitive key
+		// (e.g. "tokens": ["a","b"]) must have EVERY element carry the same excludableName as the
+		// entries pushed above, or those elements would be redacted with no way to exclude them.
+		return value.map((v, i) => redactJsonValue(v, sensitiveKey, jsonPointerAppend(pointer, i), mode, path, nextId, out, opts));
 	}
 	if (value && typeof value === "object") {
 		const result: Record<string, unknown> = {};
 		for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-			const sensitive = isSensitiveName(k);
-			result[k] = redactJsonValue(v, sensitive, jsonPointerAppend(pointer, k), mode, path, nextId, out);
+			const sensitive = isSensitiveName(k, opts?.excludedNames);
+			result[k] = redactJsonValue(v, sensitive ? k : null, jsonPointerAppend(pointer, k), mode, path, nextId, out, opts);
 		}
 		return result;
 	}
@@ -387,7 +419,9 @@ function redactJsonValue(
 
 /** Redact a `.json` file's sensitive-KEY-named values only (§3.3 - not Tier 4 content scanning, see
  * redactJsonValue). Malformed JSON is left untouched. */
-export function redactJson(text: string, mode: SanitiseMode, path: string, nextId: () => number): SanitiseFileResult {
+export function redactJson(
+	text: string, mode: SanitiseMode, path: string, nextId: () => number, opts?: SanitiseOptions,
+): SanitiseFileResult {
 	let parsed: unknown;
 	try {
 		parsed = JSON.parse(text);
@@ -395,7 +429,7 @@ export function redactJson(text: string, mode: SanitiseMode, path: string, nextI
 		return { content: text, redactions: [] };
 	}
 	const entries: Array<RedactionEntry> = [];
-	const result = redactJsonValue(parsed, false, "", mode, path, nextId, entries);
+	const result = redactJsonValue(parsed, null, "", mode, path, nextId, entries, opts);
 	if (mode !== "redact" || entries.length === 0) {
 		return { content: text, redactions: entries };
 	}
@@ -462,13 +496,17 @@ function extensionOf(path: string): string {
 }
 
 /** Redact (or scan) one archived file's content, dispatching on its extension. */
-export function sanitiseFile(path: string, content: string, mode: SanitiseMode, nextId: () => number): SanitiseFileResult {
+export function sanitiseFile(
+	path: string, content: string, mode: SanitiseMode, nextId: () => number, opts?: SanitiseOptions,
+): SanitiseFileResult {
 	const ext = extensionOf(path);
 	if (ext === "json") {
-		return redactJson(content, mode, path, nextId);
+		return redactJson(content, mode, path, nextId, opts);
 	}
 	if (ext === "g" || ext === "gcode") {
-		return redactGcodeFile(content, mode, path, nextId);
+		return redactGcodeFile(content, mode, path, nextId, opts);
 	}
+	// redactText never consults a name (no Tier 3 for plain text - see its own doc comment), so opts
+	// would be unused there; not threaded through for that reason.
 	return redactText(content, mode, path, nextId);
 }

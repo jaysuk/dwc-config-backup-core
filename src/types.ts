@@ -89,6 +89,15 @@ export interface RedactionEntry {
 	pointer?: string;
 	label: string;
 	restoreHint: RestoreHint;
+	/**
+	 * The name this entry was matched on, verbatim as it appears in the file (e.g. "maxPass", not
+	 * "maxpass"), when it came from the Tier-3 name heuristic (`isSensitiveName`) and can therefore
+	 * be suppressed by adding it to the user's redaction exclusion list (`credentials.ts`). Absent
+	 * for every other tier - a fixed command/param rule (1/2), a content pattern (4), or an M122 line
+	 * rule (5) never consults a name, so there is nothing a name-based exclusion could suppress.
+	 * A host UI should offer an "exclude" action on a redaction row if and only if this is set.
+	 */
+	excludableName?: string;
 }
 
 export interface RedactionsFile {

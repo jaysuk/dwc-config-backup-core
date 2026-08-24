@@ -149,6 +149,21 @@ describe("Tier 3 - global/var assignments with sensitive names", () => {
 		expect(content).toBe(line);
 		expect(redactions).toHaveLength(0);
 	});
+
+	it("leaves bed-levelling pass counters alone (var pass / maxpass are not passwords)", () => {
+		const text = 'var maxpass = 5\nvar pass = 0\nvar npass = 3';
+		const { content, redactions } = redactGcodeFile(text, "redact", "files/macros/bed.g", counter());
+		expect(content).toBe(text);
+		expect(redactions).toHaveLength(0);
+	});
+
+	it("still redacts real password-shaped names containing passw", () => {
+		for (const name of ["password", "adminPassword", "passwd"]) {
+			const { content, redactions } = redactGcodeFile(`var ${name} = "hunter2"`, "redact", "files/sys/config.g", counter());
+			expect(content).not.toContain("hunter2");
+			expect(redactions.some((r) => r.tier === 3 && r.params?.includes(name))).toBe(true);
+		}
+	});
 });
 
 describe("Tier 4 - content patterns", () => {
@@ -288,6 +303,80 @@ describe("Tier 3/4 - JSON files", () => {
 		const { content, redactions } = redactJson(json, "scan", "files/sys/mqtt.json", counter());
 		expect(content).toBe(json);
 		expect(redactions).toHaveLength(1);
+	});
+});
+
+describe("Redaction exclusions (REDACTION-EXCLUSIONS-PLAN.md §5) - user-excluded names", () => {
+	it("does not redact a G-code var name the user has excluded", () => {
+		const { content, redactions } = redactGcodeFile('var pass = 0', "redact", "files/macros/bed.g", counter(), { excludedNames: new Set(["pass"]) });
+		expect(content).toBe("var pass = 0");
+		expect(redactions).toHaveLength(0);
+	});
+
+	it("does not redact a JSON key the user has excluded", () => {
+		const json = JSON.stringify({ pass: 3 });
+		const { content, redactions } = redactJson(json, "redact", "files/sys/leveling.json", counter(), { excludedNames: new Set(["pass"]) });
+		expect(JSON.parse(content)).toEqual({ pass: 3 });
+		expect(redactions).toHaveLength(0);
+	});
+
+	it("exclusion is exact - excluding 'pass' leaves 'password' still redacted", () => {
+		const { content, redactions } = redactGcodeFile('var password = "hunter2"', "redact", "files/sys/config.g", counter(), { excludedNames: new Set(["pass"]) });
+		expect(content).not.toContain("hunter2");
+		expect(redactions.length).toBeGreaterThan(0);
+	});
+
+	it("exclusion matching is case-insensitive on both sides", () => {
+		const { content, redactions } = redactGcodeFile('var MaxPass = 5', "redact", "files/macros/bed.g", counter(), { excludedNames: new Set(["maxpass"]) });
+		expect(content).toBe("var MaxPass = 5");
+		expect(redactions).toHaveLength(0);
+	});
+
+	it("does not weaken Tier 1/2 fixed command/param rules - those never consult a name", () => {
+		// M551's P parameter is redacted purely because it's M551's P - GCODE_PARAM_RULES never calls
+		// isSensitiveName, so no exclusion set can ever suppress it. Exclude a name that happens to be
+		// the value itself, to make sure nothing downstream is accidentally value-matching either.
+		const { content, redactions } = redactGcodeFile('M551 P"secret"', "redact", "files/sys/config.g", counter(), { excludedNames: new Set(["secret", "p"]) });
+		expect(content).toContain('M551 P"[REDACTED]"');
+		expect(redactions).toHaveLength(1);
+	});
+
+	it("does not weaken Tier 5 M122 line rules - those never consult a name either", () => {
+		const text = "=== Diagnostics ===\nBoard ID: 08DJM-9K...\n";
+		const { content, redactions } = redactM122(text, "redact", "diagnostics/m122-mainboard.txt", counter());
+		expect(content).toContain("Board ID: [REDACTED]");
+		expect(redactions).toHaveLength(1);
+	});
+
+	it("stamps excludableName on Tier 3 G-code entries, with the RAW (non-lowercased) name", () => {
+		// wifiPassword also trips the separate Tier-4 content-pattern rule on its own "password ="
+		// text (a pre-existing, harmless double-count unrelated to this feature) - assert on the
+		// Tier-3 entry specifically rather than the total count.
+		const { redactions } = redactGcodeFile('var wifiPassword = "hunter2"', "redact", "files/sys/config.g", counter());
+		const tier3 = redactions.find((r) => r.tier === 3);
+		expect(tier3?.excludableName).toBe("wifiPassword");
+	});
+
+	it("stamps excludableName on Tier 3 JSON entries", () => {
+		const json = JSON.stringify({ password: "hunter2" });
+		const { redactions } = redactJson(json, "redact", "files/sys/mqtt.json", counter());
+		expect(redactions).toHaveLength(1);
+		expect(redactions[0].excludableName).toBe("password");
+	});
+
+	it("propagates excludableName to every element of an array under a sensitive JSON key", () => {
+		const json = JSON.stringify({ tokens: ["a", "b"] });
+		const { redactions } = redactJson(json, "redact", "files/sys/some-plugin.json", counter());
+		expect(redactions).toHaveLength(2);
+		expect(redactions.every((r) => r.excludableName === "tokens")).toBe(true);
+	});
+
+	it("leaves excludableName unset on Tier 1/2 and Tier 4/5 entries", () => {
+		const gcode = redactGcodeFile('M551 P"secret"', "redact", "files/sys/config.g", counter());
+		expect(gcode.redactions[0].excludableName).toBeUndefined();
+
+		const m122 = redactM122("Board ID: 08DJM-9K...\n", "redact", "diagnostics/m122-mainboard.txt", counter());
+		expect(m122.redactions[0].excludableName).toBeUndefined();
 	});
 });
 
