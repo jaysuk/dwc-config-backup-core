@@ -2,10 +2,10 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import {
 	addBackedUpMachineKey, addRedactionExclusion, getAutoBackupNudgeSettings, getBackedUpMachineKeys,
-	getDuetCloudFifoLimit, getEncryptPreference, getGoogleDriveSettings, getLastBackupAt, getRedactionExclusions,
-	getRedactPreference, hasAcknowledgedUnredacted, ls, removeRedactionExclusion, resetForTests,
-	setAcknowledgedUnredacted, setAutoBackupNudgeSettings, setDuetCloudFifoLimit, setEncryptPreference,
-	setGoogleDriveSettings, setLastBackupAt, setRedactPreference,
+	getDuetCloudFifoLimit, getEncryptPreference, getGoogleDriveSettings, getLastBackupAt, getLastBackupAttempt,
+	getRedactionExclusions, getRedactPreference, hasAcknowledgedUnredacted, ls, removeRedactionExclusion,
+	resetForTests, setAcknowledgedUnredacted, setAutoBackupNudgeSettings, setDuetCloudFifoLimit,
+	setEncryptPreference, setGoogleDriveSettings, setLastBackupAt, setLastBackupAttempt, setRedactPreference,
 } from "../src/credentials";
 import { configureHost, resetHostConfigForTests } from "../src/hostConfig";
 
@@ -69,6 +69,31 @@ describe("last backup timestamp", () => {
 	it("persists an ISO timestamp", () => {
 		setLastBackupAt("2026-01-01T00:00:00.000Z");
 		expect(getLastBackupAt()).toBe("2026-01-01T00:00:00.000Z");
+	});
+});
+
+describe("last backup attempt (SCHEDULED-BACKUPS-PLAN.md §4.4)", () => {
+	it("defaults to null", () => {
+		expect(getLastBackupAttempt()).toBeNull();
+	});
+	it("persists a successful attempt", () => {
+		setLastBackupAttempt({ at: "2026-01-01T00:00:00.000Z", ok: true, destination: "github" });
+		expect(getLastBackupAttempt()).toEqual({ at: "2026-01-01T00:00:00.000Z", ok: true, destination: "github" });
+	});
+	it("persists a failed attempt with a message", () => {
+		setLastBackupAttempt({ at: "2026-01-02T00:00:00.000Z", ok: false, destination: "dropbox", message: "401 Unauthorized" });
+		expect(getLastBackupAttempt()).toEqual({ at: "2026-01-02T00:00:00.000Z", ok: false, destination: "dropbox", message: "401 Unauthorized" });
+	});
+	it("is independent of the success-only lastBackupAt - a failed attempt does not touch it", () => {
+		setLastBackupAt("2026-01-01T00:00:00.000Z");
+		setLastBackupAttempt({ at: "2026-01-05T00:00:00.000Z", ok: false, destination: "webdav", message: "network error" });
+		expect(getLastBackupAt()).toBe("2026-01-01T00:00:00.000Z");
+		expect(getLastBackupAttempt()).toEqual({ at: "2026-01-05T00:00:00.000Z", ok: false, destination: "webdav", message: "network error" });
+	});
+	it("the latest call wins - only one attempt is remembered", () => {
+		setLastBackupAttempt({ at: "2026-01-01T00:00:00.000Z", ok: false, destination: "github", message: "boom" });
+		setLastBackupAttempt({ at: "2026-01-02T00:00:00.000Z", ok: true, destination: "github" });
+		expect(getLastBackupAttempt()).toEqual({ at: "2026-01-02T00:00:00.000Z", ok: true, destination: "github" });
 	});
 });
 

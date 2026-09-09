@@ -313,6 +313,36 @@ export function setLastBackupAt(iso: string): void {
 	ls()?.setItem(`${ns()}.lastBackupAt`, iso);
 }
 
+// --- Last backup ATTEMPT (SCHEDULED-BACKUPS-PLAN.md §4.4) ----------------------------------------
+//
+// Deliberately separate from `lastBackupAt` above, NOT folded into it - `lastBackupAt` stays
+// success-only because it drives the overdue calculation (`isBackupOverdue`); recording a failed
+// attempt there would make a broken destination look "recently backed up" and suppress the very nudge
+// that's supposed to catch it. `LastBackupAttempt` instead answers a different question - "what
+// happened the last time a backup was tried at all, success or failure" - so a failure is visible
+// immediately rather than only inferred from the overdue nudge re-firing on the next connect.
+//
+// Recorded on EVERY attempt (manual or automatic) that actually reaches the point of building/sending
+// a backup - not for a run that stops early because it needs input (that's not an attempt, it's a
+// prompt the user hasn't answered yet).
+
+export interface LastBackupAttempt {
+	at: string;
+	ok: boolean;
+	destination: BackupDestinationId;
+	/** Present on failure - the error message, for surfacing "...: 401 Unauthorized" style detail. */
+	message?: string;
+}
+
+export function getLastBackupAttempt(): LastBackupAttempt | null {
+	const raw = ls()?.getItem(`${ns()}.lastBackupAttempt`);
+	if (!raw) { return null; }
+	try { return JSON.parse(raw) as LastBackupAttempt; } catch { return null; }
+}
+export function setLastBackupAttempt(attempt: LastBackupAttempt): void {
+	ls()?.setItem(`${ns()}.lastBackupAttempt`, JSON.stringify(attempt));
+}
+
 // --- Automatic backup nudges (§ auto-backup triggers) -------------------------------------------------
 //
 // "Automatic" here always means a one-click reminder, never a silent upload/download - the user chose
