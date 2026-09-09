@@ -63,7 +63,12 @@ export async function requestDeviceCode(clientId: string): Promise<DeviceCodeInf
 }
 
 export type DeviceTokenOutcome =
-	| { status: "authorized"; accessToken: string }
+	// Google's device flow ALWAYS returns a refresh token (confirmed in Google's own docs: "refresh
+	// tokens are always returned for devices" - no access_type=offline or other extra param needed,
+	// unlike the classic web/installed-app authorization-code flow). Callers use it to mint a fresh
+	// access token silently via `refreshAccessToken` below, instead of re-running the device flow
+	// (showing the user a new code) every time the ~1h access token expires.
+	| { status: "authorized"; accessToken: string; refreshToken: string; expiresInSeconds: number }
 	| { status: "pending" }      // authorization_pending (HTTP 428) - keep polling, THE COMMON CASE
 	| { status: "slowDown" }     // slow_down (403) - caller must INCREASE its poll interval
 	| { status: "denied" }       // access_denied (403) - user refused
@@ -96,7 +101,12 @@ export async function pollDeviceToken(clientId: string, clientSecret: string, de
 	} catch {
 		return { status: "error", message: "Could not reach Google - check the network connection." };
 	}
-	if (body?.access_token) { return { status: "authorized", accessToken: body.access_token }; }
+	if (body?.access_token) {
+		return {
+			status: "authorized", accessToken: body.access_token,
+			refreshToken: body.refresh_token, expiresInSeconds: body.expires_in,
+		};
+	}
 	// Google's error strings, NOT RFC 8628's ("expired_token" is the RFC name; Google sends
 	// "invalid_grant" instead - see the plan's §4.5 correction 2).
 	switch (body?.error) {
@@ -108,6 +118,31 @@ export async function pollDeviceToken(clientId: string, clientSecret: string, de
 	}
 }
 
+export interface RefreshedAccessToken { accessToken: string; expiresInSeconds: number }
+
+/** Mints a new access token from a previously-stored refresh token, with no user interaction at all -
+ * this is what lets a backup skip the device flow entirely once signed in once. Returns null (not a
+ * throw) if the refresh token itself was rejected (revoked, expired from 6 months' disuse, or from a
+ * client still in "Testing" publish status, where Google caps refresh tokens at 7 days) - the caller's
+ * correct response to null is to fall back to the full device flow again, not treat it as fatal. */
+export async function refreshAccessToken(clientId: string, clientSecret: string, refreshToken: string): Promise<RefreshedAccessToken | null> {
+	let body: any; // eslint-disable-line @typescript-eslint/no-explicit-any
+	try {
+		const res = await fetch(TOKEN_URL, {
+			method: "POST",
+			headers: { "Content-Type": "application/x-www-form-urlencoded" },
+			body: new URLSearchParams({
+				client_id: clientId, client_secret: clientSecret, refresh_token: refreshToken, grant_type: "refresh_token",
+			}),
+		});
+		body = await res.json();
+	} catch {
+		return null;
+	}
+	if (!body?.access_token) { return null; }
+	return { accessToken: body.access_token, expiresInSeconds: body.expires_in };
+}
+
 async function driveFetch(accessToken: string, url: string, init?: RequestInit): Promise<any> { // eslint-disable-line @typescript-eslint/no-explicit-any
 	const res = await fetch(url, { ...init, headers: { Authorization: `Bearer ${accessToken}`, ...(init?.headers as Record<string, string> | undefined) } });
 	if (!res.ok) {
@@ -117,10 +152,17 @@ async function driveFetch(accessToken: string, url: string, init?: RequestInit):
 	return res.status === 204 ? null : res.json();
 }
 
-async function findOrCreateFolder(accessToken: string, name: string, parentId?: string): Promise<string> {
+/** Finds a folder by name (optionally under `parentId`) without creating it - the restore/list side
+ * needs "does this exist at all", where creating one just to find it empty would be actively wrong. */
+async function findFolder(accessToken: string, name: string, parentId?: string): Promise<string | null> {
 	const q = encodeURIComponent(`name='${name.replace(/'/g, "\\'")}' and mimeType='application/vnd.google-apps.folder' and trashed=false${parentId ? ` and '${parentId}' in parents` : ""}`);
 	const list = await driveFetch(accessToken, `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name)`);
-	if (list.files?.length > 0) { return list.files[0].id; }
+	return list.files?.[0]?.id ?? null;
+}
+
+async function findOrCreateFolder(accessToken: string, name: string, parentId?: string): Promise<string> {
+	const existing = await findFolder(accessToken, name, parentId);
+	if (existing) { return existing; }
 	const created = await driveFetch(accessToken, "https://www.googleapis.com/drive/v3/files", {
 		method: "POST", headers: { "Content-Type": "application/json" },
 		body: JSON.stringify({ name, mimeType: "application/vnd.google-apps.folder", parents: parentId ? [parentId] : undefined }),
@@ -146,4 +188,51 @@ export async function uploadBackup(accessToken: string, hostname: string, filena
 		method: "POST", headers: { "Content-Type": `multipart/related; boundary=${boundary}` }, body,
 	});
 	return { fileId: created.id, webViewLink: created.webViewLink };
+}
+
+export interface GoogleDriveBackupEntry { fileId: string; name: string; size: number; modifiedTime: string }
+
+/** Lists the per-machine subfolders under the shared backup root - the restore-side counterpart to
+ * `uploadBackup`'s own folder lookup, mirroring Dropbox's `listMachineFolders`. Empty (not an error) if
+ * the root folder itself doesn't exist yet - nothing has ever been backed up to this account. */
+export async function listMachineFolders(accessToken: string): Promise<Array<string>> {
+	const root = await findFolder(accessToken, BACKUP_FOLDER_NAME);
+	if (!root) { return []; }
+	const q = encodeURIComponent(`'${root}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`);
+	const list = await driveFetch(accessToken, `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name)`);
+	return (list.files ?? []).map((f: { name: string }) => f.name);
+}
+
+/** Lists backups for one machine's folder. Empty (not an error) if that machine has never been backed
+ * up to this account yet - same "absence isn't a failure" contract as Dropbox's `listBackups`. */
+export async function listBackups(accessToken: string, hostname: string): Promise<Array<GoogleDriveBackupEntry>> {
+	const root = await findFolder(accessToken, BACKUP_FOLDER_NAME);
+	if (!root) { return []; }
+	const machineFolder = await findFolder(accessToken, hostname, root);
+	if (!machineFolder) { return []; }
+	const q = encodeURIComponent(`'${machineFolder}' in parents and trashed=false`);
+	const list = await driveFetch(accessToken, `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,size,modifiedTime)`);
+	return (list.files ?? []).map((f: { id: string; name: string; size?: string; modifiedTime: string }) => ({
+		fileId: f.id, name: f.name, size: Number(f.size ?? 0), modifiedTime: f.modifiedTime,
+	}));
+}
+
+/** Downloads a backup's raw content by file ID (`?alt=media` is Drive's "give me the bytes, not the
+ * metadata" query param) - deliberately NOT routed through `driveFetch` since that always calls
+ * `res.json()`, which would try to parse a zip's binary content as JSON and fail. */
+export async function downloadBackup(accessToken: string, fileId: string): Promise<Blob> {
+	const res = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
+		headers: { Authorization: `Bearer ${accessToken}` },
+	});
+	if (!res.ok) { throw new GoogleDriveError(`Google Drive API error (${res.status}).`); }
+	return res.blob();
+}
+
+export async function deleteBackup(accessToken: string, fileId: string): Promise<void> {
+	const res = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}`, {
+		method: "DELETE", headers: { Authorization: `Bearer ${accessToken}` },
+	});
+	// A 404 here means it's already gone, which is the caller's desired end state either way - not an
+	// error worth surfacing, same tolerance every other destination's delete already has.
+	if (!res.ok && res.status !== 404) { throw new GoogleDriveError(`Google Drive API error (${res.status}).`); }
 }

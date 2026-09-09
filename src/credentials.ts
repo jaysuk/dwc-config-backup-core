@@ -435,6 +435,11 @@ export function setGithubSettings(settings: GithubSettings | null): void {
 export interface GoogleDriveSettings {
 	clientId: string;
 	clientSecret: string;
+	/** Populated after a successful device-flow sign-in (Google always issues one for this grant type -
+	 *  no access_type=offline or other extra param needed). Absent until the first sign-in. Lets a
+	 *  future backup mint a fresh access token silently (see the host's googleDriveAuth.ts) instead of
+	 *  re-running the device flow - showing the user a brand new code - every single time. */
+	refreshToken?: string;
 }
 
 /** Old key from the removed GIS flow (a bare "Web application" client ID string). Deliberately never
