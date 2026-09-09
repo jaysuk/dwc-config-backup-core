@@ -293,6 +293,11 @@ deleted, not kept skipped):
 - A successful 200 response with an `access_token` → `{ status: "authorized" }`.
 - `pollDeviceToken` on an unexpected transport failure (network error, 500, unparseable body) returns
   `{ status: "error" }` rather than throwing - callers are a polling loop, not a one-shot try/catch site.
+- **`readPlaintextCredentials` does NOT fall back to the legacy `drive.clientId` key**, and
+  `setGoogleDriveSettings` actively removes it. §4.2 states both requirements in prose but this list
+  originally omitted them as test cases - added after Phase 1, where they proved to be exactly the kind
+  of requirement a later refactor could silently undo (a fallback "for compatibility" looks helpful and
+  reintroduces the broken looks-configured-but-always-fails state §4.2 exists to prevent).
 
 Host: a test (or manual verification, per this repo's own precedent of some UI flows only being
 manually verified) that the poll loop actually widens its interval on `slow_down` and stops polling on
