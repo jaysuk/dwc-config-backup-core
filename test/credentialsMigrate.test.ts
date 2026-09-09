@@ -3,8 +3,8 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { importPlaintextCredentials, isNamespaceEncrypted, readPlaintextCredentials } from "../src/credentialsMigrate";
 import {
 	enableEncryption, getDropboxSettings, getDuetCloudSession, getGithubSettings,
-	getGoogleDriveClientId, getWebDavSettings, resetForTests, setDropboxSettings,
-	setDuetCloudSession, setGithubSettings, setGoogleDriveClientId, setWebDavSettings,
+	getGoogleDriveSettings, getWebDavSettings, ls, resetForTests, setDropboxSettings,
+	setDuetCloudSession, setGithubSettings, setGoogleDriveSettings, setWebDavSettings,
 } from "../src/credentials";
 import { configureHost, resetHostConfigForTests } from "../src/hostConfig";
 
@@ -12,7 +12,7 @@ const FULL_SOURCE_SETTINGS = {
 	github: { token: "ghp_plain", repo: "user/repo", branch: "main" },
 	dropbox: { token: "dbx_plain" },
 	webdav: { url: "https://nas.example.com", username: "james", password: "hunter2" },
-	googleDriveClientId: "client-id-123",
+	googleDrive: { clientId: "client-id-123", clientSecret: "client-secret-456" },
 };
 
 // Simulates two independently-bundled plugins sharing one browser's localStorage (the real scenario -
@@ -56,7 +56,7 @@ describe("readPlaintextCredentials", () => {
 		setGithubSettings({ token: "ghp_plain", repo: "user/repo", branch: "main" });
 		setDropboxSettings({ token: "dbx_plain" });
 		setWebDavSettings({ url: "https://nas.example.com", username: "james", password: "hunter2" });
-		setGoogleDriveClientId("client-id-123");
+		setGoogleDriveSettings({ clientId: "client-id-123", clientSecret: "client-secret-456" });
 		const session = { token: "tok", username: "james", expiresAt: Date.now() + 100000 };
 		setDuetCloudSession(session);
 
@@ -64,7 +64,7 @@ describe("readPlaintextCredentials", () => {
 		expect(creds).toEqual({
 			duetSession: session,
 			github: { token: "ghp_plain", repo: "user/repo", branch: "main" },
-			googleDriveClientId: "client-id-123",
+			googleDrive: { clientId: "client-id-123", clientSecret: "client-secret-456" },
 			dropbox: { token: "dbx_plain" },
 			webdav: { url: "https://nas.example.com", username: "james", password: "hunter2" },
 		});
@@ -76,6 +76,17 @@ describe("readPlaintextCredentials", () => {
 		// Nothing was ever written under SOURCE_NS.
 		expect(readPlaintextCredentials(SOURCE_NS)).toBeNull();
 	});
+
+	// GOOGLE-DRIVE-DEVICE-FLOW-PLAN.md §4.2: the old GIS flow's bare client ID is the wrong OAuth
+	// client type for the device flow and is rejected outright by the device-code endpoint - carrying
+	// it sideways into another host's `drive.settings` would propagate that same broken state, so this
+	// path must never fall back to reading it.
+	it("does not fall back to the old drive.clientId key when only that legacy key is present", () => {
+		configureHost({ storageNamespace: SOURCE_NS });
+		ls()?.setItem(`${SOURCE_NS}.drive.clientId`, JSON.stringify("old-web-client-id"));
+
+		expect(readPlaintextCredentials(SOURCE_NS)).toBeNull(); // nothing migratable - the legacy key doesn't count
+	});
 });
 
 describe("importPlaintextCredentials", () => {
@@ -85,7 +96,7 @@ describe("importPlaintextCredentials", () => {
 		setGithubSettings(FULL_SOURCE_SETTINGS.github);
 		setDropboxSettings(FULL_SOURCE_SETTINGS.dropbox);
 		setWebDavSettings(FULL_SOURCE_SETTINGS.webdav);
-		setGoogleDriveClientId(FULL_SOURCE_SETTINGS.googleDriveClientId);
+		setGoogleDriveSettings(FULL_SOURCE_SETTINGS.googleDrive);
 		const creds = readPlaintextCredentials(SOURCE_NS)!;
 
 		// Destination: Flexible Layouts, also unencrypted (same browser, same no-HTTPS situation).
@@ -96,7 +107,7 @@ describe("importPlaintextCredentials", () => {
 		expect(getGithubSettings()).toEqual(FULL_SOURCE_SETTINGS.github);
 		expect(getDropboxSettings()).toEqual(FULL_SOURCE_SETTINGS.dropbox);
 		expect(getWebDavSettings()).toEqual(FULL_SOURCE_SETTINGS.webdav);
-		expect(getGoogleDriveClientId()).toBe(FULL_SOURCE_SETTINGS.googleDriveClientId);
+		expect(getGoogleDriveSettings()).toEqual(FULL_SOURCE_SETTINGS.googleDrive);
 	});
 
 	it("migrates a Duet cloud session token too", () => {

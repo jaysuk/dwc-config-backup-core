@@ -20,8 +20,8 @@
  * right tool for that case - this module deliberately returns null rather than trying to also handle it.
  */
 import {
-	type DropboxSettings, type DuetCloudSession, type GithubSettings, type WebDavSettings,
-	ls, setDropboxSettings, setDuetCloudSession, setGithubSettings, setGoogleDriveClientId, setWebDavSettings,
+	type DropboxSettings, type DuetCloudSession, type GithubSettings, type GoogleDriveSettings, type WebDavSettings,
+	ls, setDropboxSettings, setDuetCloudSession, setGithubSettings, setGoogleDriveSettings, setWebDavSettings,
 } from "./credentials.js";
 
 // Deliberately reuses credentials.ts's own ls() rather than touching window.localStorage directly -
@@ -47,7 +47,11 @@ export function isNamespaceEncrypted(sourceNamespace: string): boolean {
 export interface MigratableCredentials {
 	duetSession: DuetCloudSession | null;
 	github: GithubSettings | null;
-	googleDriveClientId: string | null;
+	/** Deliberately reads the NEW `drive.settings` key only, never the old `drive.clientId` -
+	 * GOOGLE-DRIVE-DEVICE-FLOW-PLAN.md §4.2. Carrying the old "Web application" client ID sideways into
+	 * another host's namespace would propagate the same broken "looks configured, always fails" state
+	 * this migration deliberately avoids at the source. */
+	googleDrive: GoogleDriveSettings | null;
 	dropbox: DropboxSettings | null;
 	webdav: WebDavSettings | null;
 }
@@ -63,7 +67,7 @@ export function readPlaintextCredentials(sourceNamespace: string): MigratableCre
 	const creds: MigratableCredentials = {
 		duetSession: readJson(sourceNamespace, "duet.session"),
 		github: readJson(sourceNamespace, "github"),
-		googleDriveClientId: readJson(sourceNamespace, "drive.clientId"),
+		googleDrive: readJson(sourceNamespace, "drive.settings"),
 		dropbox: readJson(sourceNamespace, "dropbox"),
 		webdav: readJson(sourceNamespace, "webdav"),
 	};
@@ -80,7 +84,7 @@ export function readPlaintextCredentials(sourceNamespace: string): MigratableCre
 export function importPlaintextCredentials(creds: MigratableCredentials): void {
 	if (creds.duetSession) { setDuetCloudSession(creds.duetSession); }
 	if (creds.github) { setGithubSettings(creds.github); }
-	if (creds.googleDriveClientId) { setGoogleDriveClientId(creds.googleDriveClientId); }
+	if (creds.googleDrive) { setGoogleDriveSettings(creds.googleDrive); }
 	if (creds.dropbox) { setDropboxSettings(creds.dropbox); }
 	if (creds.webdav) { setWebDavSettings(creds.webdav); }
 }

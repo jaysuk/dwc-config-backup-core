@@ -105,7 +105,10 @@ honestly rather than offering controls that silently fail:
 
 - **Encryption needs a secure context.** `crypto.subtle` is unavailable over plain HTTP, which is how
   most Duets serve DWC. `isEncryptionAvailable()` detects this.
-- **Google Drive needs HTTPS**, by Google's OAuth policy — `isOriginSupported()` gates it.
+- **Google Drive works over plain HTTP.** It uses the OAuth 2.0 Device Authorization Grant
+  (`requestDeviceCode`/`pollDeviceToken` in `destinations/googleDrive.ts`), not Google's origin-bound
+  Identity Services popup flow — there is no origin or redirect-URI requirement at all, so it works from
+  `.local` hostnames and bare LAN IPs, the common ways a Duet is actually reached.
 - **The Duet backup service is HTTPS** (`DUET_BACKUP_API_DEFAULT` in `constants.ts`), which is
   reachable from a DWC page served over either HTTP or HTTPS — mixed-content blocking only ever
   applies in the other direction (an HTTPS page fetching plain HTTP), so this needs no

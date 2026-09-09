@@ -98,7 +98,7 @@ const CANARY_PLAINTEXT = "ok";
 /** Every localStorage suffix (under `${ns()}.`) that carries real credential material, and therefore
  * gets encrypted when encryption is on. Preference-only keys (redact toggles, the FIFO limit) are
  * deliberately excluded - nothing sensitive in them, no reason to gate them behind a passphrase. */
-const ENCRYPTABLE_SUFFIXES = ["duet.session", "github", "drive.clientId", "dropbox", "webdav"] as const;
+const ENCRYPTABLE_SUFFIXES = ["duet.session", "github", "drive.settings", "dropbox", "webdav"] as const;
 
 let sessionKey: CryptoKey | null = null;
 /** Populated in one batch by unlockSession()/enableEncryption(); cleared by lockSession(). */
@@ -397,12 +397,30 @@ export function setGithubSettings(settings: GithubSettings | null): void {
 
 // --- Google Drive --------------------------------------------------------------------------------------
 
-/** Only the OAuth CLIENT ID is persisted - the access token itself is memory-only (§6 Phase 8). */
-export function getGoogleDriveClientId(): string | null {
-	return getJson<string>("drive.clientId");
+/** OAuth "TVs and Limited Input devices" client credentials for the Device Authorization Grant flow
+ * (GOOGLE-DRIVE-DEVICE-FLOW-PLAN.md §4.2/§4.3) - unlike the removed GIS sign-in flow, the device
+ * token exchange needs a `clientSecret` alongside the `clientId` (not a real secrecy regression for
+ * this client type - see the plan's §2). The access token itself is still never persisted, only these
+ * two values. Mirrors `GithubSettings`'s shape/pattern exactly. */
+export interface GoogleDriveSettings {
+	clientId: string;
+	clientSecret: string;
 }
-export function setGoogleDriveClientId(clientId: string): void {
-	setJson("drive.clientId", clientId);
+
+/** Old key from the removed GIS flow (a bare "Web application" client ID string). Deliberately never
+ * read any more, only cleaned up: that OAuth client type is rejected outright by the device-code
+ * endpoint (`invalid_client`), so migrating it into `drive.settings` would silently manufacture a
+ * "looks configured, always fails" state (GOOGLE-DRIVE-DEVICE-FLOW-PLAN.md §4.2). */
+const LEGACY_CLIENT_ID_SUFFIX = "drive.clientId";
+
+export function getGoogleDriveSettings(): GoogleDriveSettings | null {
+	return getJson<GoogleDriveSettings>("drive.settings");
+}
+export function setGoogleDriveSettings(settings: GoogleDriveSettings | null): void {
+	setJson("drive.settings", settings);
+	// Actively remove the orphaned old key the first time the new one is written, rather than leaving a
+	// stale secret-ish value sitting in localStorage forever - nothing reads this key any more.
+	ls()?.removeItem(`${ns()}.${LEGACY_CLIENT_ID_SUFFIX}`);
 }
 
 // --- Dropbox -------------------------------------------------------------------------------------------

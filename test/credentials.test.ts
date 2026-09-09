@@ -2,13 +2,16 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import {
 	addBackedUpMachineKey, addRedactionExclusion, getAutoBackupNudgeSettings, getBackedUpMachineKeys,
-	getDuetCloudFifoLimit, getEncryptPreference, getLastBackupAt, getRedactionExclusions, getRedactPreference,
-	hasAcknowledgedUnredacted, removeRedactionExclusion, resetForTests, setAcknowledgedUnredacted,
-	setAutoBackupNudgeSettings, setDuetCloudFifoLimit, setEncryptPreference, setLastBackupAt, setRedactPreference,
+	getDuetCloudFifoLimit, getEncryptPreference, getGoogleDriveSettings, getLastBackupAt, getRedactionExclusions,
+	getRedactPreference, hasAcknowledgedUnredacted, ls, removeRedactionExclusion, resetForTests,
+	setAcknowledgedUnredacted, setAutoBackupNudgeSettings, setDuetCloudFifoLimit, setEncryptPreference,
+	setGoogleDriveSettings, setLastBackupAt, setRedactPreference,
 } from "../src/credentials";
+import { configureHost, resetHostConfigForTests } from "../src/hostConfig";
 
 beforeEach(() => {
 	resetForTests();
+	resetHostConfigForTests();
 });
 
 describe("per-destination redact preference", () => {
@@ -101,6 +104,29 @@ describe("redaction exclusions", () => {
 		addRedactionExclusion("pass");
 		removeRedactionExclusion("nope");
 		expect(getRedactionExclusions()).toEqual(["pass"]);
+	});
+});
+
+describe("Google Drive settings (GOOGLE-DRIVE-DEVICE-FLOW-PLAN.md §4.2)", () => {
+	it("defaults to null", () => {
+		expect(getGoogleDriveSettings()).toBeNull();
+	});
+
+	it("persists a clientId/clientSecret pair", () => {
+		setGoogleDriveSettings({ clientId: "id-1", clientSecret: "secret-1" });
+		expect(getGoogleDriveSettings()).toEqual({ clientId: "id-1", clientSecret: "secret-1" });
+	});
+
+	it("removes the orphaned old drive.clientId key the first time the new settings are written", () => {
+		// Simulate a pre-existing install that had the old GIS flow's bare client-ID key sitting in
+		// localStorage - it must never be read by anything any more, but it should also not just be
+		// left behind forever (§4.2: "the orphaned drive.clientId entry should be actively removed").
+		configureHost({ storageNamespace: "flexibleLayouts.configBackup" });
+		ls()?.setItem("flexibleLayouts.configBackup.drive.clientId", JSON.stringify("old-web-client-id"));
+
+		setGoogleDriveSettings({ clientId: "id-1", clientSecret: "secret-1" });
+
+		expect(ls()?.getItem("flexibleLayouts.configBackup.drive.clientId")).toBeNull();
 	});
 });
 
