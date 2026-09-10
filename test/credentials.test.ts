@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import {
 	addBackedUpMachineKey, addRedactionExclusion, getAutoBackupNudgeSettings, getBackedUpMachineKeys,
-	getDuetCloudFifoLimit, getEncryptPreference, getGoogleDriveSettings, getLastBackupAt, getLastBackupAttempt,
+	getBackupFailureStreak, getDuetCloudFifoLimit, getEncryptPreference, getGoogleDriveSettings, getLastBackupAt, getLastBackupAttempt,
 	getRedactionExclusions, getRedactPreference, hasAcknowledgedUnredacted, ls, removeRedactionExclusion,
 	resetForTests, setAcknowledgedUnredacted, setAutoBackupNudgeSettings, setDuetCloudFifoLimit,
 	setEncryptPreference, setGoogleDriveSettings, setLastBackupAt, setLastBackupAttempt, setRedactPreference,
@@ -97,6 +97,24 @@ describe("last backup attempt (SCHEDULED-BACKUPS-PLAN.md §4.4)", () => {
 	});
 });
 
+describe("consecutive backup failure streak (SCHEDULED-BACKUPS-PLAN.md §4.4 item 3)", () => {
+	it("defaults to 0", () => {
+		expect(getBackupFailureStreak()).toBe(0);
+	});
+	it("increments on each failed attempt, any destination", () => {
+		setLastBackupAttempt({ at: "2026-01-01T00:00:00.000Z", ok: false, destination: "github", message: "boom" });
+		expect(getBackupFailureStreak()).toBe(1);
+		setLastBackupAttempt({ at: "2026-01-02T00:00:00.000Z", ok: false, destination: "dropbox", message: "boom" });
+		expect(getBackupFailureStreak()).toBe(2);
+	});
+	it("resets to 0 on the first success", () => {
+		setLastBackupAttempt({ at: "2026-01-01T00:00:00.000Z", ok: false, destination: "github", message: "boom" });
+		setLastBackupAttempt({ at: "2026-01-02T00:00:00.000Z", ok: false, destination: "github", message: "boom" });
+		setLastBackupAttempt({ at: "2026-01-03T00:00:00.000Z", ok: true, destination: "github" });
+		expect(getBackupFailureStreak()).toBe(0);
+	});
+});
+
 describe("backed-up machine keys", () => {
 	it("defaults to empty", () => {
 		expect(getBackedUpMachineKeys()).toEqual([]);
@@ -156,11 +174,24 @@ describe("Google Drive settings (GOOGLE-DRIVE-DEVICE-FLOW-PLAN.md §4.2)", () =>
 });
 
 describe("automatic backup nudge settings", () => {
-	it("defaults to all triggers on with a 7-day overdue threshold", () => {
-		expect(getAutoBackupNudgeSettings()).toEqual({ configSaved: true, overdue: true, overdueDays: 7, newMachine: true });
+	it("defaults to all nudge triggers on, a 7-day overdue threshold, and auto-run OFF", () => {
+		expect(getAutoBackupNudgeSettings()).toEqual({
+			configSaved: true, overdue: true, overdueDays: 7, newMachine: true, autoRun: false, autoRunDestination: null,
+		});
 	});
-	it("persists a custom configuration", () => {
-		setAutoBackupNudgeSettings({ configSaved: false, overdue: true, overdueDays: 14, newMachine: false });
-		expect(getAutoBackupNudgeSettings()).toEqual({ configSaved: false, overdue: true, overdueDays: 14, newMachine: false });
+	it("persists a custom configuration including the auto-run fields", () => {
+		setAutoBackupNudgeSettings({
+			configSaved: false, overdue: true, overdueDays: 14, newMachine: false, autoRun: true, autoRunDestination: "dropbox",
+		});
+		expect(getAutoBackupNudgeSettings()).toEqual({
+			configSaved: false, overdue: true, overdueDays: 14, newMachine: false, autoRun: true, autoRunDestination: "dropbox",
+		});
+	});
+	it("merges the new auto-run fields in as defaults over an older stored blob that predates them (no migration)", () => {
+		// Exactly the shape a user upgrading from before Phase 3 has in localStorage.
+		ls()?.setItem("flexibleLayouts.configBackup.autoNudge", JSON.stringify({ configSaved: false, overdue: false, overdueDays: 30, newMachine: true }));
+		expect(getAutoBackupNudgeSettings()).toEqual({
+			configSaved: false, overdue: false, overdueDays: 30, newMachine: true, autoRun: false, autoRunDestination: null,
+		});
 	});
 });

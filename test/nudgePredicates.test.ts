@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { isBackupOverdue, isUnseenMachine } from "../src/nudgePredicates";
+import { FAILURE_ESCALATION_THRESHOLD, isBackupOverdue, isUnseenMachine, shouldEscalateBackupFailureAlert } from "../src/nudgePredicates";
+import { isMachineIdle } from "../src/printStatus";
 
 describe("isBackupOverdue", () => {
 	const now = new Date("2026-01-08T00:00:00.000Z").getTime();
@@ -28,5 +29,32 @@ describe("isUnseenMachine", () => {
 	});
 	it("is not unseen once this machine has a backup on record", () => {
 		expect(isUnseenMachine("machine-a", new Set(["machine-a", "machine-b"]))).toBe(false);
+	});
+});
+
+describe("shouldEscalateBackupFailureAlert", () => {
+	it("does not escalate for a first failure", () => {
+		expect(shouldEscalateBackupFailureAlert(1)).toBe(false);
+	});
+	it("does not escalate below the threshold", () => {
+		expect(shouldEscalateBackupFailureAlert(FAILURE_ESCALATION_THRESHOLD - 1)).toBe(false);
+	});
+	it("escalates once the streak reaches the threshold", () => {
+		expect(shouldEscalateBackupFailureAlert(FAILURE_ESCALATION_THRESHOLD)).toBe(true);
+		expect(shouldEscalateBackupFailureAlert(FAILURE_ESCALATION_THRESHOLD + 5)).toBe(true);
+	});
+	it("never escalates for a streak of 0 (the state after any success)", () => {
+		expect(shouldEscalateBackupFailureAlert(0)).toBe(false);
+	});
+});
+
+describe("isMachineIdle - the auto-run gate (SCHEDULED-BACKUPS-PLAN.md §4.3 step 3)", () => {
+	it("is true only for exactly 'idle'", () => {
+		expect(isMachineIdle("idle")).toBe(true);
+	});
+	it("is false for every busy/print/transitional state and for undefined", () => {
+		for (const s of ["processing", "paused", "pausing", "resuming", "busy", "changingTool", "updating", "halted", "off", undefined]) {
+			expect(isMachineIdle(s)).toBe(false);
+		}
 	});
 });

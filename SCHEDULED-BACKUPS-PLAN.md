@@ -220,17 +220,22 @@ destination on its own - however well-intentioned - is not an acceptable default
 
 ## §6 Phases
 
-**Phase 1 — headless extraction (no user-visible change).** §4.1. Ships and is verified on its own; the
-Create tab must behave identically afterwards. Don't start Phase 2 until this is solid.
+**Phase 1 — headless extraction (no user-visible change). DONE (FL).** §4.1. `collectForBackup()` +
+`runBackup()` in `Flexible-Layouts/src/model/configBackup/runBackup.ts`; the Create tab drives them
+and behaves identically.
 
-**Phase 2 — failure/attempt tracking + alerting.** §4.4 in core + host. Deliverable on its own even if
-Phase 3 never happens: it improves *manual* backups too, since attempts are recorded either way.
+**Phase 2 — failure/attempt tracking + alerting. DONE (core + FL).** §4.4. `LastBackupAttempt` +
+`getBackupFailureStreak()` in `credentials.ts`; surfaced in the Create tab.
 
-**Phase 3 — the auto-run trigger.** §4.3 + §4.5 + §5, in one host first (`duet-config-backup-plugin`,
-matching this family's usual "settle the interaction in the smallest host first" precedent).
+**Phase 3 — the auto-run trigger. DONE (core + FL).** §4.3 + §4.5 + §5. `AutoBackupNudgeSettings`
+gained `autoRun` / `autoRunDestination` (default off); `shouldEscalateBackupFailureAlert` +
+`isMachineIdle` predicates; `autoBackupNudges.ts`'s `checkOnConnect()` runs an opportunistic backup
+when opted-in + eligible + overdue + idle; CloudPanel.vue has the checkbox + eligible-destination
+picker + encryption-conflict warning. Implemented in Flexible Layouts first rather than
+`duet-config-backup-plugin` (the user is actively testing FL builds).
 
-**Phase 4 — port** to Flexible Layouts and the 3.6 plugin (the latter a genuine Vue 2 / Options API
-rewrite, not copy-paste).
+**Phase 4 — port** to `duet-config-backup-plugin` and the 3.6 plugin (the latter a genuine Vue 2 /
+Options API rewrite, not copy-paste). The core half (settings fields, predicates) is already shared.
 
 ## §7 Testing
 

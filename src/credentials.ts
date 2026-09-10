@@ -341,6 +341,18 @@ export function getLastBackupAttempt(): LastBackupAttempt | null {
 }
 export function setLastBackupAttempt(attempt: LastBackupAttempt): void {
 	ls()?.setItem(`${ns()}.lastBackupAttempt`, JSON.stringify(attempt));
+	// Maintain the consecutive-failure streak alongside the attempt record (SCHEDULED-BACKUPS-PLAN.md
+	// §4.4 item 3) - kept as its own key rather than folded into LastBackupAttempt so the attempt
+	// object's shape (and its round-trip tests) stay untouched. Any success resets it to 0.
+	ls()?.setItem(`${ns()}.backupFailureStreak`, String(attempt.ok ? 0 : getBackupFailureStreak() + 1));
+}
+
+/** How many backup attempts have failed in a row (any destination), across manual and automatic runs.
+ * 0 after any success. Maintained automatically by `setLastBackupAttempt` - there is no setter. Drives
+ * the escalating "backups keep failing" alert copy (`shouldEscalateBackupFailureAlert`). */
+export function getBackupFailureStreak(): number {
+	const raw = Number(ls()?.getItem(`${ns()}.backupFailureStreak`));
+	return Number.isFinite(raw) && raw > 0 ? raw : 0;
 }
 
 // --- Automatic backup nudges (§ auto-backup triggers) -------------------------------------------------
@@ -354,8 +366,18 @@ export interface AutoBackupNudgeSettings {
 	overdue: boolean;
 	overdueDays: number;
 	newMachine: boolean;
+	/** Opportunistic auto-run (SCHEDULED-BACKUPS-PLAN.md §4.3/§4.5): when DWC is open, the machine is
+	 * idle and a backup is overdue, take one automatically to `autoRunDestination` instead of just
+	 * nudging. Defaults FALSE - an update must never silently start pushing a user's config anywhere. */
+	autoRun: boolean;
+	/** Which destination an auto-run backs up to. `null` until the user picks one. Only the unattended-
+	 * eligible destinations are offerable (§4.2: not `local`, not `drive`, not an encrypted one) - the
+	 * host UI enforces that; this type stays wide so it can't drift from `BackupDestinationId`. */
+	autoRunDestination: BackupDestinationId | null;
 }
-const DEFAULT_NUDGE_SETTINGS: AutoBackupNudgeSettings = { configSaved: true, overdue: true, overdueDays: 7, newMachine: true };
+const DEFAULT_NUDGE_SETTINGS: AutoBackupNudgeSettings = {
+	configSaved: true, overdue: true, overdueDays: 7, newMachine: true, autoRun: false, autoRunDestination: null,
+};
 
 export function getAutoBackupNudgeSettings(): AutoBackupNudgeSettings {
 	const raw = ls()?.getItem(`${ns()}.autoNudge`);

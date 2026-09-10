@@ -14,3 +14,12 @@ export const PRINTING_STATUSES: ReadonlySet<string> = new Set([
 export function isPrintingStatus(status?: string): boolean {
 	return !!status && PRINTING_STATUSES.has(status);
 }
+
+/** Strictly "sitting there doing nothing" - the only state in which an opportunistic auto-backup
+ * (SCHEDULED-BACKUPS-PLAN.md §4.3 step 3) should start walking the machine's filesystem. Deliberately
+ * stricter than `!isPrintingStatus(...)`: "busy" (running a macro), "changingTool", "updating" etc.
+ * are all moments the machine - or the user - is mid-task, so an auto-run defers to the nudge instead.
+ * §9 Q3 settled on strictly-idle as the safe default. */
+export function isMachineIdle(status?: string): boolean {
+	return status === "idle";
+}

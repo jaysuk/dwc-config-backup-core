@@ -27,3 +27,18 @@ export function isUnseenMachine(machineKey: string, knownMachineKeys: ReadonlySe
 /** Suggested minimum gap between two "config.g was saved" nudges, so actively editing a file doesn't
  * produce a toast per save. Hosts enforce this - it's advisory, not applied here. */
 export const CONFIG_SAVE_COOLDOWN_MS = 5 * 60 * 1000;
+
+/** Once an automatic backup has failed this many times in a row, the failure alert copy escalates
+ * from a one-off "it failed" to "it keeps failing - check the connection settings"
+ * (SCHEDULED-BACKUPS-PLAN.md §4.4 item 3). A destination with an expired token fails identically on
+ * every connect, so repeating the same toast indefinitely trains the user to ignore it. */
+export const FAILURE_ESCALATION_THRESHOLD = 3;
+
+/** Whether a run of `consecutiveFailures` failed backup attempts (see `getBackupFailureStreak`) has
+ * reached the point where the alert should tell the user something is persistently wrong rather than
+ * just reporting one more failure. Pure - the host decides what to do with the answer. */
+export function shouldEscalateBackupFailureAlert(
+	consecutiveFailures: number, threshold: number = FAILURE_ESCALATION_THRESHOLD,
+): boolean {
+	return consecutiveFailures >= threshold;
+}
