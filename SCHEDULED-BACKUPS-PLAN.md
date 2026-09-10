@@ -147,13 +147,20 @@ rather than adding a parallel mechanism. New logic, in order:
 5. On success → success toast + `setLastBackupAt` (inside `runBackup`, §4.1).
 6. On failure → **failure alert** (§4.4).
 
-The existing `checkedThisSession` guard ([autoBackupNudges.ts:36](../Flexible-Layouts/src/model/configBackup/autoBackupNudges.ts#L36))
-already prevents re-firing on reconnect flaps and applies here unchanged - important, since a
-reconnect loop that re-triggered a full backup each time would be considerably worse than a duplicated toast.
+**Reconnect handling (revised during implementation).** The first cut used the existing
+`checkedThisSession` guard unchanged - one check per page load. That turned out too weak: a tab left
+open *past* the due date would never act until a manual reload, because the due moment arrives with no
+connect event behind it. The shipped version keeps the connection watch firing on every reconnect and
+re-evaluates the overdue response each time, **rate-limited to once per hour**
+(`OVERDUE_RECHECK_COOLDOWN_MS`) so a flapping connection still can't spam a toast or re-trigger a
+backup on every flap - the concern the original guard addressed. The one-time new-machine nudge stays
+first-connect-only. This still isn't a real schedule (it needs *some* reconnect - a reboot, a WiFi
+blip, a laptop waking - within the tab's lifetime), but it closes the "came due while I was watching"
+gap without a timer.
 
-**Explicitly rejected: a `setInterval` "every N hours" timer.** It only ticks while the tab is open, so
-it doesn't buy real scheduling; it adds a second trigger path to reason about; and it can fire mid-print
-with no natural gate. On-connect + overdue gives the same practical outcome with one trigger.
+**Explicitly rejected: a `setInterval` "every N hours" timer.** It adds a second trigger path to
+reason about and can fire mid-print with no natural gate. On-connect + the hourly reconnect re-check
+above gives the same practical outcome with one trigger.
 
 ### §4.4 Failure and "missed" alerting — the second half of the ask
 
