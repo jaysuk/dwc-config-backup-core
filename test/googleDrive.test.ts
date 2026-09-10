@@ -145,6 +145,19 @@ describe("listMachineFolders", () => {
 		}));
 		expect(await listMachineFolders("token")).toEqual(["voron24", "ratrig"]);
 	});
+
+	// Regression: a `drive.file` re-consent (or a race) can leave two folders of the same name, and
+	// without an explicit order upload and restore each picked "whatever Drive returned first" - which
+	// could differ, so restore listed a different folder than the last backup was written to. The
+	// folder lookup must ask Drive to order by createdTime (oldest first) so the choice is stable.
+	it("asks Drive to order folder lookups by createdTime so a duplicate-named folder is resolved deterministically", async () => {
+		const fetchMock = vi.fn(async () => jsonResponse({ files: [{ id: "oldest", name: "Duet Config Backups" }, { id: "newer", name: "Duet Config Backups" }] }));
+		vi.stubGlobal("fetch", fetchMock);
+		await listMachineFolders("token");
+		// The first call is the root findFolder() - it must ask Drive to sort, so upload and restore
+		// both land on the same (oldest) folder when more than one of the name exists.
+		expect(fetchMock.mock.calls[0][0]).toContain("orderBy=createdTime");
+	});
 });
 
 describe("listBackups", () => {

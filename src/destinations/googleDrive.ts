@@ -153,10 +153,19 @@ async function driveFetch(accessToken: string, url: string, init?: RequestInit):
 }
 
 /** Finds a folder by name (optionally under `parentId`) without creating it - the restore/list side
- * needs "does this exist at all", where creating one just to find it empty would be actively wrong. */
+ * needs "does this exist at all", where creating one just to find it empty would be actively wrong.
+ *
+ * `orderBy=createdTime` (oldest first) makes the choice DETERMINISTIC when more than one folder of the
+ * same name exists. That happens for real: the `drive.file` scope only lets the app see files it
+ * created under the CURRENT authorization, so revoking + re-consenting (or recreating the OAuth
+ * client) can leave the app unable to see a folder it made earlier, and `findOrCreateFolder` then
+ * makes a fresh one; a race between two concurrent uploads can do it too. Without an explicit order,
+ * upload and restore each got "whatever Drive returned first", which could differ - so a restore would
+ * list a different folder than the one the last backup was written into. Oldest-first also means a
+ * race-created duplicate (always newer) is ignored in favour of the original. */
 async function findFolder(accessToken: string, name: string, parentId?: string): Promise<string | null> {
 	const q = encodeURIComponent(`name='${name.replace(/'/g, "\\'")}' and mimeType='application/vnd.google-apps.folder' and trashed=false${parentId ? ` and '${parentId}' in parents` : ""}`);
-	const list = await driveFetch(accessToken, `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name)`);
+	const list = await driveFetch(accessToken, `https://www.googleapis.com/drive/v3/files?q=${q}&orderBy=createdTime&fields=files(id,name)`);
 	return list.files?.[0]?.id ?? null;
 }
 
