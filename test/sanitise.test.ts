@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { redactGcodeFile, redactJson, redactM122, redactText, sanitiseFile } from "../src/sanitise";
+import { parseAssignmentLine, redactGcodeFile, redactJson, redactM122, redactText, sanitiseFile } from "../src/sanitise";
 
 function counter() {
 	let n = 0;
@@ -163,6 +163,64 @@ describe("Tier 3 - global/var assignments with sensitive names", () => {
 			expect(content).not.toContain("hunter2");
 			expect(redactions.some((r) => r.tier === 3 && r.params?.includes(name))).toBe(true);
 		}
+	});
+
+	// Real coverage gap found 2026-09-14 and fixed by switching to dwc-gcode-core's parseAssignment:
+	// the old ASSIGNMENT_RE only matched "set global.X = ..." and bare "var X = ...", with no path
+	// for the bare "global X = ..." declaration (RRF's current syntax - the wiki's own example is
+	// "global T1heat=0") or "set var.X = ...". A secret declared either of those two ways matched
+	// neither ASSIGNMENT_RE nor LEADING_CODE_RE (no digit after the letters) and fell through Tier 3
+	// entirely - only still caught if its name happened to also match a Tier 4 content pattern.
+	it("redacts the bare 'global NAME = ...' declaration - RRF's current syntax, previously missed", () => {
+		const { content, redactions } = redactGcodeFile('global wifiPassword = "hunter2"', "redact", "files/sys/config.g", counter());
+		expect(content).toContain('global wifiPassword = "[REDACTED]"');
+		expect(content).not.toContain("hunter2");
+		expect(redactions[0]).toMatchObject({ code: "GLOBAL", params: ["wifiPassword"], tier: 3 });
+	});
+
+	it("redacts 'set var.NAME = ...' - previously missed the same way", () => {
+		const { content, redactions } = redactGcodeFile('set var.apiToken = "abc123"', "redact", "files/sys/config.g", counter());
+		expect(content).toContain('set var.apiToken = "[REDACTED]"');
+		expect(redactions[0]).toMatchObject({ code: "VAR", params: ["apiToken"] });
+	});
+
+	it("a name Tier 4 cannot independently catch used to leak completely via the bare 'global' form", () => {
+		// "hash" is in SENSITIVE_NAME_RE (sanitise.ts's own comment names "adminHash"/"operatorHash",
+		// FL's real access-lock field names, as the reason it's there) but is NOT one of Tier 4's
+		// content-pattern keywords (api-key/token/secret/password/passwd/pwd/psk/auth) - so unlike
+		// e.g. "mqttToken" (which Tier 4 would also catch on its own, masking a Tier 3 gap), this name
+		// depends on Tier 3 alone. Before this fix, the bare "global" form parsed as no assignment at
+		// all, so this secret was redacted by nothing.
+		const { content } = redactGcodeFile('global operatorHash = "correct-horse-battery"', "redact", "files/sys/config.g", counter());
+		expect(content).not.toContain("correct-horse-battery");
+	});
+
+	it("redacts the WHOLE expression, not just its first token (also previously broken)", () => {
+		// The old regex's value group was "\S+" - a single non-space run - so a multi-token RRF
+		// expression like "someFunc() + otherSecret" would have redacted only "someFunc()", leaving
+		// " + otherSecret" - the rest of the real value - untouched in the output.
+		const { content } = redactGcodeFile("var apiSecret = someFunc() + otherSecretPart", "redact", "files/sys/config.g", counter());
+		expect(content).not.toContain("someFunc()");
+		expect(content).not.toContain("otherSecretPart");
+	});
+
+	it("is case-insensitive by design, unlike RRF itself - the deliberate safety margin", () => {
+		// dwc-gcode-core's own parseAssignment is case-SENSITIVE (matching RRF exactly); this module
+		// deliberately widens that for redaction, since over-matching dead/miscapitalised text is the
+		// safe direction here, not a bug to fix.
+		for (const line of ['GLOBAL wifiPassword = "hunter2"', 'Set Global.wifiPassword = "hunter2"', 'VAR wifiPassword = "hunter2"', 'set VAR.wifiPassword = "hunter2"']) {
+			const { content } = redactGcodeFile(line, "redact", "files/sys/config.g", counter());
+			expect(content, line).not.toContain("hunter2");
+		}
+	});
+
+	it("parseAssignmentLine (used by restore's suggestFromLive) also covers all four forms now", () => {
+		expect(parseAssignmentLine('global wifiPassword = "realvalue"')).toEqual({
+			varName: "wifiPassword", isGlobal: true, value: "realvalue",
+		});
+		expect(parseAssignmentLine('set var.apiToken = "realvalue"')).toEqual({
+			varName: "apiToken", isGlobal: false, value: "realvalue",
+		});
 	});
 });
 

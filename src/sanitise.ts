@@ -8,6 +8,8 @@
  * trailing `[FL-REDACTED:<id>]` tag so a later restore can locate and repair it even after the file
  * has been edited and line numbers have drifted (see repair.ts).
  */
+import { parseAssignment as parseRrfAssignment, type Assignment } from "dwc-gcode-core";
+
 import { REDACTED_VALUE, REDACTED_TAG_PREFIX } from "./constants.js";
 import type { RedactionEntry, RedactionTier, RestoreHint } from "./types.js";
 
@@ -98,8 +100,39 @@ function isSensitiveName(name: string, excludedNames?: ReadonlySet<string>): boo
 }
 
 const LEADING_CODE_RE = /^\s*(?:N\d+\s+)?([A-Za-z]\d+(?:\.\d+)?)\b/;
-const ASSIGNMENT_RE = /^(\s*(?:set\s+global\.|var\s+)([A-Za-z_][A-Za-z0-9_]*)\s*=\s*)("(?:[^"]|"")*"|\S+)(.*)$/i;
-const IS_GLOBAL_RE = /^\s*set\s+global\./i;
+
+/**
+ * `var NAME = expr` / `global NAME = expr` (declare) and `set var.NAME = expr` /
+ * `set global.NAME = expr` (assign) — all four of RRF's variable-mutating forms, via
+ * `dwc-gcode-core`'s `parseAssignment` (RRF 3.7.0-rc.1-verified against `StringParser`, not a regex
+ * maintained here). This module used to have its own `ASSIGNMENT_RE`, matching only `set global.X`
+ * and bare `var X` - **it had no path for the bare `global X = expr` declaration (RRF's current,
+ * documented syntax for a new global - the wiki's own example is `global T1heat=0`) or
+ * `set var.X = expr`.** A secret declared as `global mySecret = "…"` matched neither that regex nor
+ * `LEADING_CODE_RE` (no digit after the letters) and fell through Tier 3 entirely, redacted only if
+ * its name happened to contain one of Tier 4's literal keywords - `wifiPass` would not. Found and
+ * fixed 2026-09-14, not assumed fine because it worked in every existing test.
+ *
+ * `parseAssignment` is deliberately case-SENSITIVE (matching RRF exactly - `Set`/`VAR` are not real
+ * RRF syntax). For THIS purpose that would be a narrowing, not an improvement: over-matching text RRF
+ * would never actually execute as an assignment is the *safe* direction for a redaction tool - a
+ * secret sitting in dead, miscapitalised text is still a secret if a backup is shared verbatim.
+ * `parseAssignmentLoose` keeps that margin: try the exact parse first, and only if that fails, retry
+ * against a fully-lowercased copy of the line and re-slice the ORIGINAL text using the spans that
+ * comes back (spans are pure character positions - unaffected by the case change - so this recovers
+ * the assignment's real, original-case name/value text, not the lowercased copy's).
+ */
+function parseAssignmentLoose(raw: string): Assignment | null {
+	const exact = parseRrfAssignment(raw);
+	if (exact) { return exact; }
+	const loose = parseRrfAssignment(raw.toLowerCase());
+	if (!loose) { return null; }
+	return {
+		...loose,
+		name: raw.slice(loose.nameStart, loose.nameEnd),
+		expression: raw.slice(loose.expressionStart, loose.expressionEnd),
+	};
+}
 
 /** Matches one `LETTER<value>` parameter token, where value is a quoted string, a number, or a bare run. */
 const PARAM_TOKEN_RE = /([A-Za-z])("(?:[^"]|"")*"|-?\d+(?:\.\d+)*|[^\s;]+)/g;
@@ -151,13 +184,13 @@ export function parseGcodeLine(line: string): ParsedGcodeLine {
 
 export interface ParsedAssignmentLine { varName: string; isGlobal: boolean; value: string }
 
-/** Parse a `set global.X = …` / `var X = …` line, if that's what the line is. */
+/** Parse any of RRF's four variable-mutating forms on one line, if that's what the line is - see
+ *  `parseAssignmentLoose`'s own doc comment for why this isn't just `dwc-gcode-core`'s
+ *  `parseAssignment` directly. */
 export function parseAssignmentLine(line: string): ParsedAssignmentLine | null {
-	const commentAt = findCommentStart(line);
-	const codePart = commentAt === -1 ? line : line.slice(0, commentAt);
-	const m = ASSIGNMENT_RE.exec(codePart);
-	if (!m) { return null; }
-	return { varName: m[2], isGlobal: IS_GLOBAL_RE.test(codePart), value: unquote(m[3]) };
+	const a = parseAssignmentLoose(line);
+	if (!a) { return null; }
+	return { varName: a.name, isGlobal: a.scope === "global", value: unquote(a.expression) };
 }
 
 // --- Tier 4: content patterns, applied per-line after tier 1-3 have already scrubbed structured values
@@ -232,20 +265,20 @@ export function redactGcodeLine(
 	let newCode = code;
 	const entries: Array<RedactionEntry> = [];
 
-	// Tier 3: `set global.X = ...` / `var X = ...` assignments with a sensitive-looking name.
-	const assignment = ASSIGNMENT_RE.exec(code);
+	// Tier 3: any of RRF's four variable-mutating forms, with a sensitive-looking name.
+	const assignment = parseAssignmentLoose(code);
 	if (assignment) {
-		const [, prefix, varName, value, rest] = assignment;
+		const { name: varName, expression: value } = assignment;
 		if (isSensitiveName(varName, opts?.excludedNames)) {
 			const id = nextId();
-			const pseudoCode = IS_GLOBAL_RE.test(code) ? "GLOBAL" : "VAR";
+			const pseudoCode = assignment.scope === "global" ? "GLOBAL" : "VAR";
 			entries.push({
 				id, path, line: lineNo, tier: 3, kind: "gcode-command", code: pseudoCode, params: [varName],
 				label: `Variable "${varName}"`, restoreHint: "credential", excludableName: varName,
 			});
 			if (mode === "redact") {
 				const replacement = isQuoted(value) ? `"${REDACTED_VALUE}"` : REDACTED_VALUE;
-				newCode = `${prefix}${replacement}${rest}`;
+				newCode = code.slice(0, assignment.expressionStart) + replacement + code.slice(assignment.expressionEnd);
 			}
 		}
 	} else {
