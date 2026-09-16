@@ -118,14 +118,39 @@ const LEADING_CODE_RE = /^\s*(?:N\d+\s+)?([A-Za-z]\d+(?:\.\d+)?)\b/;
  * would never actually execute as an assignment is the *safe* direction for a redaction tool - a
  * secret sitting in dead, miscapitalised text is still a secret if a backup is shared verbatim.
  * `parseAssignmentLoose` keeps that margin: try the exact parse first, and only if that fails, retry
- * against a fully-lowercased copy of the line and re-slice the ORIGINAL text using the spans that
- * comes back (spans are pure character positions - unaffected by the case change - so this recovers
- * the assignment's real, original-case name/value text, not the lowercased copy's).
+ * against a lowercased copy of the line and re-slice the ORIGINAL text using the spans that comes
+ * back (spans are pure character positions - unaffected by the case change - so this recovers the
+ * assignment's real, original-case name/value text, not the lowercased copy's).
+ *
+ * The lowercasing is ASCII-only (`A`-`Z` only), not `String.prototype.toLowerCase()` - RRF's own
+ * identifier/keyword grammar (`meta.ts`'s `NAME_RE`, `metaKeywordOf`) is ASCII-only, so this is never a
+ * narrowing. Switched 2026-09-16: `toLowerCase()` is NOT guaranteed length-preserving for some non-ASCII
+ * characters (confirmed directly - `"İ".toLowerCase()` is 2 UTF-16 units, not 1), which COULD in
+ * principle desync `nameStart`/`nameEnd`/`expressionStart`/`expressionEnd` (computed against the
+ * lowercased copy) from `raw`'s own coordinates. In practice, tracing `parseAssignment`'s real return
+ * values for several constructions (a non-ASCII character can only ever land inside the VALUE, since
+ * RRF identifiers are ASCII-only) never produced a wrong final result here - `code.slice()`'s clamping
+ * at the string's own end absorbs an inflated `expressionEnd` for a value at the end of the line, and a
+ * same-line trailing bareword gets consumed into the SAME expression by RRF's own grammar either way,
+ * not left as a separate suffix a wrong offset could clip. Kept as a real, verified correctness fix
+ * regardless (computing offsets against a copy that provably isn't guaranteed to be the same length as
+ * the string they're later applied to is a latent hazard independent of whether today's call sites
+ * happen to be shielded from it), not because a concrete corruption case was reproduced end-to-end - it
+ * wasn't, despite a real attempt.
  */
+function toAsciiLower(s: string): string {
+	let out = "";
+	for (let i = 0; i < s.length; i++) {
+		const c = s.charCodeAt(i);
+		out += c >= 65 && c <= 90 ? String.fromCharCode(c + 32) : s[i];
+	}
+	return out;
+}
+
 function parseAssignmentLoose(raw: string): Assignment | null {
 	const exact = parseRrfAssignment(raw);
 	if (exact) { return exact; }
-	const loose = parseRrfAssignment(raw.toLowerCase());
+	const loose = parseRrfAssignment(toAsciiLower(raw));
 	if (!loose) { return null; }
 	return {
 		...loose,
