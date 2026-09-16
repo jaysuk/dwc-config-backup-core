@@ -40,11 +40,25 @@ const GCODE_PARAM_RULES: Record<string, Record<string, ParamRule>> = {
 	M551: { P: { tier: 1, label: "Machine password", restoreHint: "credential" } },
 	M587: {
 		S: { tier: 1, label: "WiFi network SSID", restoreHint: "credential" },
+		// P means the pre-shared key in a simple network, but the enterprise (EAP) TLS private-key
+		// FILE or PEAP/TTLS password in an enterprise one (RRF's X parameter selects which) - tier 1
+		// either way, since both are credentials.
 		P: { tier: 1, label: "WiFi network password", restoreHint: "credential" },
 		I: { tier: 2, label: "Static IP address", restoreHint: "network" },
-		J: { tier: 2, label: "Static netmask", restoreHint: "network" },
-		K: { tier: 2, label: "Static gateway", restoreHint: "network" },
-		L: { tier: 2, label: "Static DNS server", restoreHint: "network" },
+		// J/K were swapped here before 2026-09-16 (verified directly against
+		// WiFiInterface::HandleWiFiCode: gb.Seen('J') sets config.gateway, gb.Seen('K') sets
+		// config.netmask) - a cosmetic label fix (both were already tier 2/"network" either way), found
+		// while migrating this table's real parameters onto dwc-gcode-core's own dictionary.
+		J: { tier: 2, label: "Static gateway", restoreHint: "network" },
+		K: { tier: 2, label: "Static netmask", restoreHint: "network" },
+		// Enterprise (802.1X EAP) credentials, only sent when X selects EAP-TLS (X1) or EAP-PEAP/TTLS-
+		// MSCHAPv2 (X2/X3) - missing here before 2026-09-16, a real gap: an enterprise WiFi identity/
+		// username or private-key password would previously have been backed up unredacted. E (CA
+		// certificate) and A (anonymous identity) are deliberately NOT listed - both are meant to be
+		// exposed by the EAP protocol itself (a CA cert is public; the anonymous identity is sent in
+		// the clear during the outer EAP negotiation by design), not secrets this tool needs to hide.
+		U: { tier: 1, label: "Enterprise WiFi identity/username", restoreHint: "credential" },
+		Q: { tier: 1, label: "Enterprise WiFi private-key password", restoreHint: "credential" },
 	},
 	M588: { S: { tier: 1, label: "WiFi network SSID (forget)", restoreHint: "credential" } },
 	M589: {

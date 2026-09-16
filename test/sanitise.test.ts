@@ -25,14 +25,39 @@ describe("redactGcodeFile - Tier 1/2 credential and network parameters", () => {
 		expect(redactions[0].tier).toBe(1);
 	});
 
-	it("redacts M587 static-IP tier-2 params (I/J/K/L)", () => {
-		const { content, redactions } = redactGcodeFile('M587 S"Net" P"pw" I192.168.1.5 J255.255.255.0 K192.168.1.1 L8.8.8.8', "redact", "files/sys/config.g", counter());
+	it("redacts M587 static-IP tier-2 params (I/J/K)", () => {
+		// J is the gateway and K is the netmask (RRF's WiFiInterface::HandleWiFiCode - verified
+		// directly, not assumed from letter order) - this test, and the redaction rule it exercises,
+		// had J/K's LABELS swapped before 2026-09-16 (harmless for redaction itself, since both were
+		// already tier 2 either way, but wrong for a restore-time prompt). M587 has no L parameter at
+		// all - the previous version of this test asserted an "L[REDACTED]" for a "Static DNS server"
+		// that RRF's M587 handler never reads; corrected in the same pass as the dictionary migration.
+		const { content, redactions } = redactGcodeFile('M587 S"Net" P"pw" I192.168.1.5 J192.168.1.1 K255.255.255.0', "redact", "files/sys/config.g", counter());
 		expect(content).toContain("I[REDACTED]");
 		expect(content).toContain("J[REDACTED]");
 		expect(content).toContain("K[REDACTED]");
-		expect(content).toContain("L[REDACTED]");
-		expect(redactions[0].params).toEqual(["S", "P", "I", "J", "K", "L"]);
+		expect(redactions[0].params).toEqual(["S", "P", "I", "J", "K"]);
 		expect(redactions[0].tier).toBe(1); // min tier across params on the line
+	});
+
+	it("redacts M587 enterprise (EAP) WiFi credentials U/Q, but not the non-secret E/A/X", () => {
+		// U (identity/username) and Q (private-key password) were missing from the redaction table
+		// before 2026-09-16 - a real gap, since enterprise WiFi credentials would previously have been
+		// backed up unredacted. E (CA certificate) and A (anonymous identity) are deliberately not
+		// redacted - both are meant to be exposed by the EAP protocol itself, not secrets. Values here
+		// are deliberately NOT email-shaped, so Tier 4's own generic email-address pattern (a real,
+		// separate safety net - see its own list above) can't also catch A/E and mask what this test is
+		// actually checking (the Tier 1/2 rule table's own U/Q/A/E treatment).
+		const { content, redactions } = redactGcodeFile(
+			'M587 X1 S"Corp" A"anonymous" U"alice" P"pk.pem" Q"pkpass" E"ca.pem"',
+			"redact", "files/sys/config.g", counter(),
+		);
+		expect(content).toContain('U"[REDACTED]"');
+		expect(content).toContain('Q"[REDACTED]"');
+		expect(content).toContain('P"[REDACTED]"');
+		expect(content).toContain('A"anonymous"'); // untouched
+		expect(content).toContain('E"ca.pem"'); // untouched
+		expect(redactions[0].params).toEqual(["S", "U", "P", "Q"]);
 	});
 
 	it("redacts M588 forget-network SSID", () => {
