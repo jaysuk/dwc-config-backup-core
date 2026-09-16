@@ -4,6 +4,8 @@
  * excluded from every restore plan - they're never part of `manifest.files[]`, only ever separate
  * zip entries, so there is nothing here that could ever restore them.
  */
+import { classifyFile } from "dwc-gcode-core";
+
 import { computeMachineKey } from "./archive.js";
 import type { MachineIdentity } from "./archive.js";
 import { DIR_FOLDER, REDACTED_TAG_RE, REDACTED_VALUE } from "./constants.js";
@@ -280,6 +282,7 @@ export async function applyRestorePlan(io: MachineIO, opts: ApplyRestoreOptions)
 	let done = 0;
 	const results: Array<ApplyFileResult> = [];
 	let touchedConfigG = false;
+	let touchedConfigOverride = false;
 
 	for (const entry of opts.plan.entries) {
 		if (entry.status === "invalid") {
@@ -299,7 +302,9 @@ export async function applyRestorePlan(io: MachineIO, opts: ApplyRestoreOptions)
 				}
 				await io.upload(entry.targetPath, new Blob([text], { type: "text/plain" }));
 				await verifyTextWrite(io, entry.targetPath, text);
-				if (entry.targetPath.toLowerCase().endsWith("/config.g")) { touchedConfigG = true; }
+				const kind = classifyFile(entry.targetPath).kind;
+				if (kind === "config") { touchedConfigG = true; }
+				else if (kind === "config-override") { touchedConfigOverride = true; }
 			}
 			results.push({ targetPath: entry.targetPath, status: "written" });
 		} catch (e) {
@@ -320,5 +325,5 @@ export async function applyRestorePlan(io: MachineIO, opts: ApplyRestoreOptions)
 		opts.onProgress?.(done, total);
 	}
 
-	return { results, touchedConfigG };
+	return { results, touchedConfigG, touchedConfigOverride };
 }

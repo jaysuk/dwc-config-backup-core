@@ -206,7 +206,16 @@ export interface ApplyFileResult {
 
 export interface ApplyRestoreResult {
 	results: Array<ApplyFileResult>;
+	/** A file classified as `dwc-gcode-core`'s `"config"` kind (i.e. `config.g` itself) was written -
+	 *  RRF only re-parses it on a full reboot (`M999`) or `M98 P"config.g"`, so a host UI prompts for one. */
 	touchedConfigG: boolean;
+	/** A file classified as `dwc-gcode-core`'s `"config-override"` kind (i.e. `config-override.g`,
+	 *  written by `M500` and normally re-applied via `M501`) was written - unlike `config.g`, RRF
+	 *  applies it the moment `M501` runs, no reboot needed. Added alongside `touchedConfigG` rather
+	 *  than folded into it, since the two need different host-side prompts ("M999" vs "M501") - no
+	 *  host currently reads this field, so wiring up that prompt is a real, separate follow-up, not
+	 *  done here (see dwc-gcode-core's own migration notes for this package, 2026-09-16). */
+	touchedConfigOverride: boolean;
 }
 
 // --- Repair --------------------------------------------------------------------------------------

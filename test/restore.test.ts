@@ -200,6 +200,19 @@ describe("applyRestorePlan", () => {
 		expect(io.uploaded).toHaveLength(1);
 		expect(io.uploaded[0].path).toBe("0:/sys/config.g");
 		expect(result.touchedConfigG).toBe(true);
+		expect(result.touchedConfigOverride).toBe(false);
+	});
+
+	it("reports touchedConfigOverride for config-override.g, distinct from touchedConfigG - RRF re-parses config.g only on a full reboot/M999, but config-override.g (written by M500) is re-applied the moment M501 runs, so the two need different host-side prompts", async () => {
+		const archive = await makeArchive([collectedFile("system", "config-override.g", "M92 X80.000")]);
+		const selection = new Set(archive.manifest.files.map((f) => f.path));
+		const plan = buildRestorePlan(archive, selection, LIVE_DIRS, "merge", new Set());
+		const io = fakeIo();
+		const result = await applyRestorePlan(io, { archive, plan });
+		expect(io.uploaded).toHaveLength(1);
+		expect(io.uploaded[0].path).toBe("0:/sys/config-override.g");
+		expect(result.touchedConfigG).toBe(false);
+		expect(result.touchedConfigOverride).toBe(true);
 	});
 
 	it("reports progress once per file/deletion, ending at the total count", async () => {
