@@ -288,3 +288,16 @@ Host:
    written, rather than only when overdue)? Attractive - it's the moment a backup is most valuable -
    but it needs a debounce well beyond the existing 5-minute nudge cooldown to avoid backing up
    repeatedly during an editing session.
+
+### Resolutions (recorded from the Flexible-Layouts MISSING-FEATURES-PLAN, Part A)
+
+1. **One destination** - unchanged; still "do not build" until someone asks. If asked: overdue means *any* selected
+   destination is stale, and the failure streak becomes per destination (needs a per-destination `lastBackupAt` here first).
+2. **Manual failures do not toast.** They are recorded (`setLastBackupAttempt`) and shown by the Create tab, which the user is
+   looking at; only automatic runs toast.
+3. **Strictly `idle`.** `paused` is not eligible - it is also when someone may be editing config. Flexible Layouts now also
+   triggers on the *edge* into idle (a job finishing), under the same one-hour cooldown as the on-connect trigger.
+4. **Yes, opt-in, debounced.** `autoRunOnConfigSave` (default false) backs up a while after `config.g` is saved: the host waits
+   for the last save of a burst to settle (>= 10 minutes), runs only if auto-run's own conditions hold, and otherwise falls back
+   to the ordinary "config.g saved" nudge. The field is optional in `AutoBackupNudgeSettings`; a stored blob that predates it
+   reads as off, so no migration.

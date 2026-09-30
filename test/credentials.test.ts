@@ -176,7 +176,7 @@ describe("Google Drive settings (GOOGLE-DRIVE-DEVICE-FLOW-PLAN.md §4.2)", () =>
 describe("automatic backup nudge settings", () => {
 	it("defaults to all nudge triggers on, a 7-day overdue threshold, and auto-run OFF", () => {
 		expect(getAutoBackupNudgeSettings()).toEqual({
-			configSaved: true, overdue: true, overdueDays: 7, newMachine: true, autoRun: false, autoRunDestination: null,
+			configSaved: true, overdue: true, overdueDays: 7, newMachine: true, autoRun: false, autoRunDestination: null, autoRunOnConfigSave: false,
 		});
 	});
 	it("persists a custom configuration including the auto-run fields", () => {
@@ -184,14 +184,23 @@ describe("automatic backup nudge settings", () => {
 			configSaved: false, overdue: true, overdueDays: 14, newMachine: false, autoRun: true, autoRunDestination: "dropbox",
 		});
 		expect(getAutoBackupNudgeSettings()).toEqual({
-			configSaved: false, overdue: true, overdueDays: 14, newMachine: false, autoRun: true, autoRunDestination: "dropbox",
+			configSaved: false, overdue: true, overdueDays: 14, newMachine: false, autoRun: true, autoRunDestination: "dropbox", autoRunOnConfigSave: false,
 		});
+	});
+	it("persists autoRunOnConfigSave (opt-in, default off) and merges it in over a blob that predates it", () => {
+		setAutoBackupNudgeSettings({
+			configSaved: true, overdue: true, overdueDays: 7, newMachine: true, autoRun: true, autoRunDestination: "webdav", autoRunOnConfigSave: true,
+		});
+		expect(getAutoBackupNudgeSettings().autoRunOnConfigSave).toBe(true);
+		// A blob written by a host that does not know the field: no migration, it simply reads as off.
+		ls()?.setItem("flexibleLayouts.configBackup.autoNudge", JSON.stringify({ configSaved: true, overdue: true, overdueDays: 7, newMachine: true, autoRun: true, autoRunDestination: "webdav" }));
+		expect(getAutoBackupNudgeSettings().autoRunOnConfigSave).toBe(false);
 	});
 	it("merges the new auto-run fields in as defaults over an older stored blob that predates them (no migration)", () => {
 		// Exactly the shape a user upgrading from before Phase 3 has in localStorage.
 		ls()?.setItem("flexibleLayouts.configBackup.autoNudge", JSON.stringify({ configSaved: false, overdue: false, overdueDays: 30, newMachine: true }));
 		expect(getAutoBackupNudgeSettings()).toEqual({
-			configSaved: false, overdue: false, overdueDays: 30, newMachine: true, autoRun: false, autoRunDestination: null,
+			configSaved: false, overdue: false, overdueDays: 30, newMachine: true, autoRun: false, autoRunDestination: null, autoRunOnConfigSave: false,
 		});
 	});
 });

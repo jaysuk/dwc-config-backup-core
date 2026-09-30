@@ -374,9 +374,16 @@ export interface AutoBackupNudgeSettings {
 	 * eligible destinations are offerable (§4.2: not `local`, not `drive`, not an encrypted one) - the
 	 * host UI enforces that; this type stays wide so it can't drift from `BackupDestinationId`. */
 	autoRunDestination: BackupDestinationId | null;
+	/** Also take an unattended backup a while after `config.g` is SAVED (MISSING-FEATURES-PLAN §A2 in the
+	 * Flexible-Layouts repo; SCHEDULED-BACKUPS-PLAN.md §9 Q4). The host waits for the last save of a burst to
+	 * settle (>= 10 minutes) and only runs when auto-run's own conditions hold; otherwise it falls back to the
+	 * ordinary "config.g saved" nudge. Defaults FALSE. Optional so an older host that never sets it still type-checks,
+	 * and a stored blob that predates it needs no migration (the default is merged in on read). */
+	autoRunOnConfigSave?: boolean;
 }
 const DEFAULT_NUDGE_SETTINGS: AutoBackupNudgeSettings = {
 	configSaved: true, overdue: true, overdueDays: 7, newMachine: true, autoRun: false, autoRunDestination: null,
+	autoRunOnConfigSave: false,
 };
 
 export function getAutoBackupNudgeSettings(): AutoBackupNudgeSettings {
