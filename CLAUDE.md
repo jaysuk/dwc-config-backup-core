@@ -101,18 +101,18 @@ This package's own release is independent of any host's:
 
 1. `npm version patch` (this family has always used patch bumps here, even for real features —
    0.1.x has stayed 0.1.x throughout; a deliberate convention, not an oversight).
-2. `git push origin main --follow-tags`, then `npm publish`.
+2. `git push origin main --follow-tags` — the pushed tag runs `.github/workflows/release.yml` (the shared
+   `npm-release.yml` in `jaysuk/dwc-plugin-workflows`), which tests, publishes to npm (trusted publishing: no
+   token, provenance attached) and creates the GitHub Release. Don't `npm publish` by hand.
 3. **Each host needs its own separate bump+tag+release** — publishing here does nothing for any host
    until: unlink, `npm install dwc-config-backup-core@<new version>` (3.7 hosts) or bump `CORE_VERSION`
    in `release.yml` (3.6), verify (tests + typecheck + a real build, not just typecheck), bump that
    host's own `plugin.json`/`package.json` version, commit, tag, push. The three repos' version
    numbers are **not** kept in lockstep with each other or with this package's version — they've
    diverged before (e.g. this package at 0.1.13 while both hosts are at 1.3.0) and that's expected.
-4. All three plugin repos (not this one) generate GitHub Release notes via a shared changelog
-   generator fetched from `jaysuk/dwc-plugin-runtime` at a pinned commit SHA
-   (`RUNTIME_REF` in each host's `release.yml`) — categorised Conventional-Commit sections, a
-   compare-range link, then a per-repo `scripts/release-footer.mjs` for install instructions. This
-   repo itself has no release workflow of its own (no GitHub Release step) — just the npm publish above.
+4. The plugin repos release through the shared workflow in `jaysuk/dwc-plugin-workflows` (the 3.6 host
+   keeps its own build steps but uses the shared notes/title/footer scripts); see that repo's README. This
+   repo's own release is the npm publish + GitHub Release above.
 
 ## Known gotchas
 

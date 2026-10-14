@@ -1,0 +1,30 @@
+name: Release
+
+# Release: bump "version" in package.json, commit, then
+#
+#   git tag v1.2.3 && git push origin v1.2.3
+#
+# The shared workflow (jaysuk/dwc-plugin-workflows, npm-release.yml) tests the package, publishes it to npm
+# with trusted publishing (no stored token, provenance attached) and creates the GitHub Release. Do not
+# `npm publish` by hand.
+#
+# One-time npm setup (needs your npm 2FA; do it shortly before the first tagged release, it expires after
+# 2 days if unused):
+#
+#   npm trust github dwc-config-backup-core --file release.yml --repo jaysuk/dwc-config-backup-core --allow-publish
+#
+# Run it by hand from the Actions tab (Run workflow) for a dry run that publishes nothing.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write # create the GitHub Release
+  id-token: write # npm trusted publishing; must be granted here as well as in the shared workflow
+
+jobs:
+  release:
+    uses: jaysuk/dwc-plugin-workflows/.github/workflows/npm-release.yml@v1
